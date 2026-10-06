@@ -13,6 +13,7 @@
 const DMS_CONFIG = {
   APP_NAME: 'Document Management System',
   APP_VERSION: '1.11.0-production',
+  TARGET_DRIVE_ACCOUNT: 'jackslomberger@gmail.com',
   DEFAULT_ROOT_FOLDER_NAME: 'DMS_ROOT_REPOSITORY',
   DEFAULT_SESSION_TIMEOUT_MINUTES: 60,
   DEFAULT_TRASH_RETENTION_DAYS: 30,
@@ -1492,6 +1493,38 @@ function doGet(e) {
     .setTitle(DMS_CONFIG.APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * doPost handler for remote REST API calls from Vercel / GitHub hosted frontend.
+ * When deployed as a Web App executed as jackslomberger@gmail.com,
+ * all file uploads directly save to jackslomberger@gmail.com's Google Drive.
+ */
+function doPost(e) {
+  try {
+    let payload = {};
+    if (e && e.postData && e.postData.contents) {
+      payload = JSON.parse(e.postData.contents);
+    } else if (e && e.parameter) {
+      payload = e.parameter;
+    }
+    const action = payload.action;
+    const args = payload.args || [];
+    
+    // Check if function exists in global scope
+    const fn = this[action];
+    if (typeof fn === 'function') {
+      const result = fn.apply(this, args);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else {
+      return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_FOUND', 'API Action ' + action + ' is not registered.')))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_DO_POST_EXCEPTION', err.message)))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 function apiResponseSuccess(data, message) { return { success: true, data: data || null, message: message || 'OK' }; }

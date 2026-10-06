@@ -75,22 +75,21 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', overflow: 'hidden', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <header style={{
-        minHeight: '46px',
-        height: 'auto',
+        height: '42px',
+        minHeight: '42px',
         backgroundColor: '#0A192F',
         color: '#FFFFFF',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '4px 1rem',
+        padding: '0 1rem',
         borderBottom: '1px solid #1E293B',
         fontSize: '12px',
         flexShrink: 0,
         zIndex: 50,
-        flexWrap: 'wrap',
-        gap: '6px'
+        gap: '8px'
       }}>
         {/* Left: Spacer */}
         <div style={{ display: 'flex', alignItems: 'center' }}></div>
@@ -190,8 +189,36 @@ export default function App() {
           </div>
         )}
 
-        {/* Right: Actions - Download All ZIP only accessible to Super Admin */}
+        {/* Right: Actions - Fullscreen & Download All ZIP only accessible to Super Admin */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={() => {
+              if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+              } else {
+                document.exitFullscreen().catch(() => {});
+              }
+            }}
+            title="Toggle Layar Penuh (Fullscreen)"
+            style={{
+              backgroundColor: '#1E293B',
+              color: '#94A3B8',
+              border: '1px solid #334155',
+              padding: '5px 10px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontWeight: 500,
+              transition: 'all 0.2s'
+            }}
+          >
+            <span>⛶</span>
+            <span>Layar Penuh</span>
+          </button>
+
           {isSuperAdmin && (
             <a
               href="/enterprise-dms-appsscript.zip"
@@ -199,7 +226,7 @@ export default function App() {
               style={{
                 backgroundColor: '#059669',
                 color: '#FFFFFF',
-                padding: '6px 12px',
+                padding: '5px 12px',
                 borderRadius: '6px',
                 textDecoration: 'none',
                 fontWeight: 600,
@@ -218,7 +245,7 @@ export default function App() {
       </header>
 
       {/* Main View Area */}
-      <main style={{ flex: 1, width: '100%', overflow: 'hidden', position: 'relative' }}>
+      <main style={{ flex: 1, width: '100%', height: 'calc(100% - 42px)', overflow: 'hidden', position: 'relative' }}>
         {activeTab === 'drive' && isSuperAdmin ? (
           <GoogleDriveManager />
         ) : (
@@ -236,7 +263,8 @@ export default function App() {
               width: '100%',
               height: '100%',
               border: 'none',
-              display: 'block'
+              display: 'block',
+              overflow: 'hidden'
             }}
           />
         )}
