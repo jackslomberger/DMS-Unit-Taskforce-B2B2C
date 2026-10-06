@@ -1,0 +1,6 @@
+{
+  "name": "Document Management System",
+  "description": "Enterprise project-centric Document Management System (DMS) built for Google Workspace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
