@@ -112,12 +112,13 @@ Aplikasi ini menggunakan arsitektur **Hybrid Dual-Tier Enterprise Architecture**
    - Mencatat log audit pertama `SYSTEM_INITIALIZED`.
 
 #### Langkah 5: Daftarkan Akun Super Administrator Pertama (`bootstrapFirstAdmin`)
-1. Pada dropdown fungsi di toolbar atas editor, pilih **`bootstrapFirstAdmin`**.
+1. Pada dropdown fungsi di toolbar atas editor, pilih **`bootstrapFirstAdmin`** (atau jalankan `setupDMS` yang kini otomatis mendaftarkan akun default).
 2. Klik **Run**.
 3. Secara default, akun Super Admin terdaftar dengan kredensial:
    - **Email**: `admin@jasindo.co.id`
-   - **Password**: `AdminPassword2026!`
-   - Status: `ACTIVE` dengan flag ganti sandi di login pertama.
+   - **Password / Access Key**: `tfb2b2c` (atau `AdminPassword2026!`)
+   - Role: `SUPER_ADMIN`
+   - Status: `ACTIVE`
 
 #### Langkah 6: Pasang Otomasi Trigger Harian (`installTriggers`)
 1. Pada dropdown fungsi, pilih **`installTriggers`**.

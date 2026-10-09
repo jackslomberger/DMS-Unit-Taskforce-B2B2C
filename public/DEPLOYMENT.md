@@ -41,7 +41,7 @@ Aplikasi ini menggunakan arsitektur **Hybrid Dual-Tier Enterprise Architecture**
 #### Struktur Hirarki Folder di Google Drive:
 - **Root Directory**: `DMS_ROOT_REPOSITORY` (dibuat otomatis di *My Drive* saat fungsi inisialisasi `setupDMS` dijalankan).
 - **Project Folder**: Setiap kali Super Admin membuat project baru, folder `[ProjectCode] - [ProjectName]` otomatis dibuat di dalam `DMS_ROOT_REPOSITORY`.
-- **14 Subfolder Kategori Standar**: Setiap folder project otomatis dilengkapi dengan 14 subfolder kategori:
+- **14 Subfolder Kategori Standar + Kategori Kustom**: Setiap folder project otomatis dilengkapi dengan 14 subfolder kategori standar:
   1. `01_PKS` (Perjanjian Kerja Sama)
   2. `02_NDA` (Non-Disclosure Agreement)
   3. `03_MOU` (Memorandum of Understanding)
@@ -56,6 +56,7 @@ Aplikasi ini menggunakan arsitektur **Hybrid Dual-Tier Enterprise Architecture**
   12. `12_GUIDE_BOOK` (SOP & Manual)
   13. `13_KORESPONDENSI_EMAIL`
   14. `14_DOKUMEN_LEGALITAS`
+  - **Kategori Baru / Kustom**: Apabila saat input project baru atau upload dokumen pengguna memasukkan kategori baru yang belum terdaftar (misal `15. Addendum` atau `16. Berita Acara`), sistem secara dinamis dan otomatis membentuk subfolder untuk kategori baru tersebut di Google Drive dan mendaftarkannya ke dalam taksonomi Document Explorer.
 
 #### Siklus Hidup Dokumen (Document Lifecycle):
 1. **Upload**: User mengunggah berkas di web UI -> Berkas dikirim dalam format byte stream -> `DriveService.saveFileToCategoryFolder` membuat file fisik di Google Drive pada subfolder kategori terkait -> Mengembalikan `fileId`, `fileUrl`, `fileSize`, `mimeType` -> Dicatat ke sheet `DOCUMENTS`.
@@ -111,12 +112,13 @@ Aplikasi ini menggunakan arsitektur **Hybrid Dual-Tier Enterprise Architecture**
    - Mencatat log audit pertama `SYSTEM_INITIALIZED`.
 
 #### Langkah 5: Daftarkan Akun Super Administrator Pertama (`bootstrapFirstAdmin`)
-1. Pada dropdown fungsi di toolbar atas editor, pilih **`bootstrapFirstAdmin`**.
+1. Pada dropdown fungsi di toolbar atas editor, pilih **`bootstrapFirstAdmin`** (atau jalankan `setupDMS` yang kini otomatis mendaftarkan akun default).
 2. Klik **Run**.
 3. Secara default, akun Super Admin terdaftar dengan kredensial:
    - **Email**: `admin@jasindo.co.id`
-   - **Password**: `AdminPassword2026!`
-   - Status: `ACTIVE` dengan flag ganti sandi di login pertama.
+   - **Password / Access Key**: `tfb2b2c` (atau `AdminPassword2026!`)
+   - Role: `SUPER_ADMIN`
+   - Status: `ACTIVE`
 
 #### Langkah 6: Pasang Otomasi Trigger Harian (`installTriggers`)
 1. Pada dropdown fungsi, pilih **`installTriggers`**.

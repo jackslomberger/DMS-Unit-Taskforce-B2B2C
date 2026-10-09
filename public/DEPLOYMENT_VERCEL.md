@@ -20,8 +20,8 @@ Aplikasi beroperasi secara independen tanpa ketergantungan pada server Apps Scri
 - **Database Katalog Dokumen di Drive**:
   - Indeks metadata tersimpan langsung di dalam folder root Google Drive (`dms_metadata_registry.json`) dan disinkronkan secara aman di browser client.
 - **Kredensial Super Administrator Portal**:
-  - **Email**: `jackslomberger@gmail.com` (atau `admin@jasindo.co.id`)
-  - **Password**: `AdminPassword2026!` (atau `tfb2b2c`)
+  - **Email**: `admin@jasindo.co.id`
+  - **Password**: `tfb2b2c` (atau `AdminPassword2026!`)
   - **Role**: `SUPER_ADMIN`
 
 ---
