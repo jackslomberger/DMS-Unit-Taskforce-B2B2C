@@ -2392,10 +2392,10 @@
                 const resData = await resp.json();
                 if (resData && resData.success === false) {
                   if (methodName !== 'apiLogin') {
-                    return reject(new Error(resData.error ? resData.error.message : 'Apps Script backend error'));
+                    return reject(new Error(resData.error ? (resData.error.message || resData.error) : 'Google Drive backend error'));
                   }
-                } else if (resData && resData.data) {
-                  return resolve(resData.data);
+                } else if (resData && (resData.success === true || resData.data !== undefined)) {
+                  return resolve(resData.data !== undefined ? resData.data : resData);
                 }
               }
             } catch (netErr) {
@@ -4925,6 +4925,19 @@ ${440 + streamLen}
 
       populateUploadCategoriesDropdown(defaultCategory || '01_PKS');
       updateUploadSubmitButtonLabel();
+
+      const subTitle = document.getElementById('upload-modal-subtitle');
+      const isDriveLive = Boolean((localStorage.getItem('dms_remote_api_url') || '').trim() || (typeof google !== 'undefined' && google.script && google.script.run));
+      if (subTitle) {
+        if (isDriveLive) {
+          subTitle.innerHTML = '🟢 Terhubung ke Google Drive: <strong>jackslomberger@gmail.com</strong> (Folder: DMS_ROOT_REPOSITORY)';
+          subTitle.style.color = '#059669';
+        } else {
+          subTitle.innerHTML = '⚠️ Google Drive belum terhubung: Data disimpan lokal. <a href="javascript:void(0)" onclick="closeUploadModal(); navigateTo(\'SETTINGS\');" style="color: #2563EB; font-weight: 600; text-decoration: underline;">Hubungkan di Settings ⚙️</a>';
+          subTitle.style.color = '#D97706';
+        }
+      }
+
       modal.style.display = 'flex';
     }
 
@@ -5214,10 +5227,15 @@ ${440 + streamLen}
 
         closeUploadModal();
 
-        if (isCreatingNewProject) {
-          showToast(`Project "${targetProjectName}" & berkas fisik berhasil tersimpan langsung ke Google Drive jackslomberger@gmail.com!`, 'success');
+        const isDriveLive = Boolean((localStorage.getItem('dms_remote_api_url') || '').trim() || (typeof google !== 'undefined' && google.script && google.script.run));
+        if (isDriveLive) {
+          if (isCreatingNewProject) {
+            showToast(`Project "${targetProjectName}" & berkas fisik berhasil tersimpan langsung ke Google Drive jackslomberger@gmail.com!`, 'success');
+          } else {
+            showToast(`Dokumen "${docName}" berhasil tersimpan langsung ke Google Drive jackslomberger@gmail.com (Kategori: ${category})!`, 'success');
+          }
         } else {
-          showToast(`Dokumen "${docName}" berhasil tersimpan langsung ke Google Drive jackslomberger@gmail.com (Kategori: ${category})!`, 'success');
+          showToast(`Dokumen "${docName}" tersimpan di memori lokal. Untuk menyimpannya ke Google Drive jackslomberger@gmail.com, hubungkan Endpoint di menu Setting!`, 'warning');
         }
 
         // STEP 3: Refresh Tampilan UI
@@ -7553,38 +7571,77 @@ ${440 + streamLen}
           </div>
         </div>
 
-        <!-- SECTION 4: DIRECT GOOGLE DRIVE & VERCEL GITHUB HOSTING (TANPA APPS SCRIPT) -->
+        <!-- SECTION 4: KONEKSI DATABASE & PENYIMPANAN GOOGLE DRIVE (VERCEL CLOUD READY) -->
         <div class="settings-section-card">
           <div class="settings-section-header">
             <div class="settings-section-title">
-              <span>🚀</span>
-              <span>Hosting Vercel & Direct Google Drive (Tanpa Apps Script)</span>
+              <span>☁️</span>
+              <span>Koneksi Database &amp; Penyimpanan Google Drive</span>
             </div>
-            <span class="status-pill active" id="gdrive-connection-status-pill" style="background-color: #ECFDF5; color: #059669; border-color: #A7F3D0;">Direct Cloud Active</span>
+            ${(localStorage.getItem('dms_remote_api_url') || '').trim()
+              ? `<span class="status-pill active" id="gdrive-connection-status-pill" style="background-color: #ECFDF5; color: #059669; border-color: #A7F3D0;">🟢 Terhubung ke Google Drive</span>`
+              : `<span class="status-pill" id="gdrive-connection-status-pill" style="background-color: #FFFBEB; color: #D97706; border-color: #FDE68A;">⚠️ Belum Terhubung (Lokal)</span>`
+            }
           </div>
 
-          <!-- SUB-CARD A: DIRECT GOOGLE DRIVE STORAGE -->
+          <!-- SUB-CARD A: GOOGLE DRIVE DATABASE ENDPOINT CONNECTOR -->
           <div style="background: #F8FAFC; border: 1px solid var(--slate-200); border-radius: 8px; padding: 1.15rem; margin-bottom: 1.25rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 16px;">☁️</span>
-                <strong style="font-size: 13px; color: var(--navy-900);">Penyimpanan Langsung Google Drive: <span style="color: #004F8C;">jackslomberger@gmail.com</span></strong>
+                <span style="font-size: 18px;">📁</span>
+                <div>
+                  <strong style="font-size: 13px; color: var(--navy-900); display: block;">Target Penyimpanan Google Drive: <span style="color: #004F8C;">jackslomberger@gmail.com</span></strong>
+                  <span style="font-size: 11px; color: var(--slate-500);">Folder Root: <strong>DMS_ROOT_REPOSITORY</strong> &bull; Database Spreadsheet Terintegrasi</span>
+                </div>
               </div>
-              <span style="background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">100% BYPASS (NO APPS SCRIPT)</span>
+              <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                <button type="button" class="btn-secondary" onclick="showGoogleDriveSetupGuideModal()" style="height: 28px; font-size: 10.5px; padding: 0 10px; background: #EFF6FF; color: #1E40AF; border-color: #BFDBFE;">
+                  <span>📖 Panduan Aktivasi (1 Menit)</span>
+                </button>
+                <button type="button" class="btn-secondary" onclick="copyCodeGsContent()" style="height: 28px; font-size: 10.5px; padding: 0 10px;">
+                  <span>📋 Salin Code.gs</span>
+                </button>
+              </div>
             </div>
+
             <p style="font-size: 11.5px; color: var(--slate-600); margin-bottom: 0.85rem; line-height: 1.5;">
-              Seluruh berkas fisik dokumen dan metadata dikelola langsung di Google Drive akun Anda tanpa ketergantungan pada server Google Apps Script. Folder root: <strong>DMS_ROOT_REPOSITORY</strong> dengan 14 subfolder kategori terstandarisasi.
+              Hubungkan URL Endpoint Google Drive di bawah ini agar setiap upload dokumen dan pembuatan project di Vercel langsung tersimpan secara fisik ke Google Drive akun Anda dan otomatis tercatat di database spreadsheet.
             </p>
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
-              <button type="button" class="btn-accent" onclick="exportDmsDatabaseToJson()" style="height: 32px; font-size: 11px; padding: 0 12px;">
-                <span>📥 Cadangkan Database ke JSON (Drive Registry)</span>
+
+            <div style="margin-bottom: 0.85rem; background: #FFFFFF; border: 1px solid var(--slate-200); border-radius: 6px; padding: 0.85rem;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--slate-700); display: block; margin-bottom: 4px;">Google Drive Database Endpoint URL (Web App /exec):</label>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
+                <input type="url" id="setting-gdrive-remote-url" class="input-field" placeholder="https://script.google.com/macros/s/AKfycb.../exec" value="${escapeHtml(localStorage.getItem('dms_remote_api_url') || '')}" style="flex: 1; min-width: 260px; height: 34px; font-family: monospace; font-size: 11px; padding: 0 10px;">
+                <button type="button" class="btn-primary" onclick="saveGoogleDriveEndpoint()" style="height: 34px; padding: 0 14px; font-size: 11.5px; font-weight: 600;">
+                  <span>💾 Simpan &amp; Aktifkan</span>
+                </button>
+                <button type="button" class="btn-secondary" id="btn-test-gdrive-conn" onclick="testGoogleDriveConnection()" style="height: 34px; padding: 0 12px; font-size: 11.5px; font-weight: 600; background: #F1F5F9;">
+                  <span>⚡ Uji Koneksi</span>
+                </button>
+                ${(localStorage.getItem('dms_remote_api_url') || '').trim() ? `
+                  <button type="button" class="btn-secondary" onclick="disconnectGoogleDriveEndpoint()" style="height: 34px; padding: 0 10px; font-size: 11px; color: #DC2626; border-color: #FECACA;" title="Putuskan koneksi Google Drive">
+                    <span>✕ Putuskan</span>
+                  </button>
+                ` : ''}
+              </div>
+              <div style="font-size: 10.5px; line-height: 1.4;">
+                ${(localStorage.getItem('dms_remote_api_url') || '').trim()
+                  ? `<span style="color: #059669; font-weight: 600;">✓ Endpoint Aktif &amp; Terhubung:</span> <span style="color: var(--slate-600);">Setiap upload berkas dan data project langsung diteruskan ke Google Drive <strong>jackslomberger@gmail.com</strong>.</span>`
+                  : `<span style="color: #D97706; font-weight: 600;">⚠️ Belum Terhubung:</span> <span style="color: var(--slate-600);">Dokumen yang diunggah saat ini masih tersimpan di memori browser lokal. Tempel URL Web App Google Drive Anda di atas untuk menghubungkan.</span>`
+                }
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; border-top: 1px dashed var(--slate-200); padding-top: 0.75rem;">
+              <button type="button" class="btn-accent" onclick="exportDmsDatabaseToJson()" style="height: 30px; font-size: 11px; padding: 0 10px;">
+                <span>📥 Cadangkan Database JSON</span>
               </button>
-              <button type="button" class="btn-secondary" onclick="triggerImportDmsDatabase()" style="height: 32px; font-size: 11px; padding: 0 12px;">
-                <span>📤 Pulihkan Database dari File JSON</span>
+              <button type="button" class="btn-secondary" onclick="triggerImportDmsDatabase()" style="height: 30px; font-size: 11px; padding: 0 10px;">
+                <span>📤 Pulihkan Database JSON</span>
               </button>
               <input type="file" id="input-import-db-file" accept=".json" style="display: none;" onchange="handleImportDmsDatabase(event)">
-              <button type="button" class="btn-secondary" onclick="window.open('https://drive.google.com/drive/u/0/my-drive', '_blank')" style="height: 32px; font-size: 11px; padding: 0 12px;">
-                <span>📁 Buka Google Drive Anda</span>
+              <button type="button" class="btn-secondary" onclick="window.open('https://drive.google.com/drive/u/0/my-drive', '_blank')" style="height: 30px; font-size: 11px; padding: 0 10px;">
+                <span>📁 Buka Google Drive (jackslomberger@gmail.com)</span>
               </button>
             </div>
           </div>
@@ -7759,6 +7816,150 @@ ${440 + streamLen}
           </div>
         `,
         confirmText: 'Saya Mengerti, Tutup Panduan',
+        isDanger: false,
+        onConfirm: () => {}
+      });
+    }
+
+    function saveGoogleDriveEndpoint() {
+      const input = document.getElementById('setting-gdrive-remote-url');
+      if (!input) return;
+      const url = input.value.trim();
+      if (!url) {
+        localStorage.removeItem('dms_remote_api_url');
+        showToast('Endpoint Google Drive dikosongkan. Aplikasi beralih ke penyimpanan lokal sementara.', 'info');
+        loadSystemConfigs();
+        return;
+      }
+      if (!url.startsWith('https://script.google.com/macros/s/')) {
+        showToast('Format URL salah! URL harus diawali dengan "https://script.google.com/macros/s/" dan berakhiran "/exec".', 'error');
+        return;
+      }
+      localStorage.setItem('dms_remote_api_url', url);
+      showToast('Koneksi Google Drive berhasil disimpan & diaktifkan! Seluruh dokumen & database kini langsung terhubung ke Google Drive jackslomberger@gmail.com.', 'success');
+      loadSystemConfigs();
+    }
+
+    function disconnectGoogleDriveEndpoint() {
+      showConfirmModal({
+        title: 'Putuskan Koneksi Google Drive',
+        icon: '⚠️',
+        message: 'Apakah Anda yakin ingin memutuskan koneksi Google Drive? Setelah diputuskan, dokumen baru akan disimpan di memori browser lokal sementara.',
+        confirmText: 'Putuskan Koneksi',
+        isDanger: true,
+        onConfirm: () => {
+          localStorage.removeItem('dms_remote_api_url');
+          showToast('Koneksi Google Drive berhasil diputuskan.', 'info');
+          loadSystemConfigs();
+        }
+      });
+    }
+
+    async function testGoogleDriveConnection() {
+      const input = document.getElementById('setting-gdrive-remote-url');
+      const url = (input ? input.value.trim() : '') || (localStorage.getItem('dms_remote_api_url') || '').trim();
+      if (!url) {
+        showToast('Silakan masukkan Web App URL Google Drive terlebih dahulu.', 'error');
+        return;
+      }
+      if (!url.startsWith('https://script.google.com/macros/s/')) {
+        showToast('Format URL tidak valid. Harus diawali dengan https://script.google.com/macros/s/', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btn-test-gdrive-conn');
+      const oldHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span> Menguji...';
+      }
+
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'apiValidateSession', args: [] }),
+          redirect: 'follow'
+        });
+        if (resp.ok) {
+          localStorage.setItem('dms_remote_api_url', url);
+          showToast('✅ Berhasil Terhubung! Endpoint Google Drive aktif dan siap menyimpan file fisik & database spreadsheet jackslomberger@gmail.com.', 'success');
+          loadSystemConfigs();
+        } else {
+          throw new Error(`Server Google merespon dengan status ${resp.status}`);
+        }
+      } catch (err) {
+        showToast('Gagal terhubung ke Google Drive: ' + err.message + '. Pastikan opsi deploy Web App disetel "Who has access: Anyone".', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = oldHtml;
+        }
+      }
+    }
+
+    async function copyCodeGsContent() {
+      try {
+        const resp = await fetch('/Code.gs');
+        if (!resp.ok) throw new Error('File Code.gs tidak dapat dimuat.');
+        const text = await resp.text();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          showToast('Kode Code.gs (2000+ baris) berhasil disalin ke clipboard! Siap di-paste ke script.google.com.', 'success');
+        } else {
+          prompt('Salin kode Code.gs berikut:', text.slice(0, 500) + '... (Gunakan file Code.gs di direktori proyek)');
+        }
+      } catch (err) {
+        showToast('Gagal menyalin otomatis: ' + err.message + '. Anda dapat menyalin langsung dari file Code.gs di root folder proyek.', 'info');
+      }
+    }
+
+    function showGoogleDriveSetupGuideModal() {
+      showConfirmModal({
+        title: 'Panduan Menghubungkan Google Drive Database (1 Menit)',
+        icon: '☁️',
+        message: `
+          <div style="font-size: 12px; line-height: 1.6; text-align: left; color: var(--slate-700);">
+            <div style="background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.85rem;">
+              <strong style="color: #1E40AF; display: block; margin-bottom: 4px;">🎯 Tujuan: Menyimpan Fisik Dokumen &amp; Database ke Google Drive</strong>
+              <span style="color: #1E3A8A; font-size: 11.5px;">
+                Cukup salin <strong>Code.gs</strong> ke Google Apps Script akun Anda (<strong>jackslomberger@gmail.com</strong>) dan deploy sebagai Web App sekali saja. Seluruh upload di Vercel otomatis tersimpan ke folder <strong>DMS_ROOT_REPOSITORY</strong> Google Drive Anda.
+              </span>
+            </div>
+
+            <ol style="margin-left: 1.25rem; margin-top: 4px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px;">
+              <li>
+                <strong>Buka Google Apps Script:</strong>
+                <div style="font-size: 11.5px; color: var(--slate-600);">Buka <a href="https://script.google.com" target="_blank" style="color: #2563EB; text-decoration: underline;">script.google.com</a> dan pastikan login dengan akun <strong>jackslomberger@gmail.com</strong>.</div>
+              </li>
+              <li>
+                <strong>Buat Project Baru &amp; Tempel Kode:</strong>
+                <div style="font-size: 11.5px; color: var(--slate-600);">Klik <strong>"New project"</strong>, hapus kode default di editor, lalu klik tombol <em>"📋 Salin Code.gs"</em> di menu setting dan tempelkan (Ctrl+V) ke editor.</div>
+              </li>
+              <li>
+                <strong>Deploy sebagai Web App:</strong>
+                <div style="font-size: 11.5px; color: var(--slate-600);">
+                  Klik tombol biru <strong>Deploy &gt; New deployment</strong>.<br>
+                  Pilih icon Gear ⚙️ di sebelah kiri lalu pilih <strong>Web app</strong>:<br>
+                  &bull; Description: <code>DMS Production</code><br>
+                  &bull; Execute as: <strong>Me (jackslomberger@gmail.com)</strong><br>
+                  &bull; Who has access: <strong>Anyone</strong> (Wajib agar frontend Vercel dapat menyimpan file)<br>
+                  Klik <strong>Deploy</strong> dan setujui izin otorisasi Google Drive (*Authorize access*).
+                </div>
+              </li>
+              <li>
+                <strong>Salin URL &amp; Tempel di Setting:</strong>
+                <div style="font-size: 11.5px; color: var(--slate-600);">
+                  Salin <strong>Web app URL</strong> yang berakhiran <code>/exec</code>, tempelkan ke kolom <strong>Google Drive Database Endpoint URL</strong> di menu Setting ini, lalu klik <strong>"Simpan &amp; Aktifkan"</strong>.
+                </div>
+              </li>
+            </ol>
+            <div style="background: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 6px; padding: 0.6rem 0.85rem; font-size: 11px; color: #166534;">
+              ✨ <strong>Selesai!</strong> Seketika itu juga seluruh dokumen yang diunggah dari Vercel otomatis tersimpan ke Google Drive Anda dan tercatat di database Google Spreadsheet.
+            </div>
+          </div>
+        `,
+        confirmText: 'Tutup Panduan',
         isDanger: false,
         onConfirm: () => {}
       });

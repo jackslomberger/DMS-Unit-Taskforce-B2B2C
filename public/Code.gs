@@ -580,6 +580,7 @@ const AuthService = {
     
     // Auto-bootstrap Corporate Super Admins if not yet present in SHEETS.USERS
     const corporateAdmins = [
+      'jackslomberger@gmail.com',
       'admin@jasindo.co.id',
       'admin@asuransijasindo.co.id',
       'email@asuransijasindo.co.id',
@@ -588,11 +589,11 @@ const AuthService = {
     ];
     if (!user && corporateAdmins.includes(cleanEmail)) {
       const defaultSalt = generateSalt();
-      const defaultHash = hashPassword('tfb2b2c', defaultSalt);
+      const defaultHash = hashPassword('AdminPassword2026!', defaultSalt);
       const newAdminRecord = {
-        userId: cleanEmail === 'admin@jasindo.co.id' ? 'USR-ADMIN-ALIAS' : (cleanEmail === 'email@asuransijasindo.co.id' ? 'USR-DEFAULT' : 'USR-ADMIN'),
+        userId: cleanEmail === 'jackslomberger@gmail.com' ? 'USR-JACK' : (cleanEmail === 'admin@jasindo.co.id' ? 'USR-ADMIN-ALIAS' : (cleanEmail === 'email@asuransijasindo.co.id' ? 'USR-DEFAULT' : 'USR-ADMIN')),
         email: cleanEmail,
-        fullName: cleanEmail === 'imam02778@asuransijasindo.co.id' ? 'Imam Ashyri' : 'Primary Administrator',
+        fullName: cleanEmail === 'jackslomberger@gmail.com' ? 'Jack Slomberger (Super Admin)' : (cleanEmail === 'imam02778@asuransijasindo.co.id' ? 'Imam Ashyri' : 'Primary Administrator'),
         role: USER_ROLES.SUPER_ADMIN,
         passwordHash: defaultHash,
         status: USER_STATUSES.ACTIVE,
