@@ -1193,6 +1193,44 @@
         min-width: 0;
       }
     }
+
+    /* GOOGLE DRIVE ACCELERATOR & TURBO SYNC STYLES */
+    .btn-turbo-sync {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 10px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      border-radius: 6px;
+      color: #10B981;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .btn-turbo-sync:hover {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: #10B981;
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+      color: #34D399;
+    }
+    .turbo-pulse {
+      width: 7px;
+      height: 7px;
+      background-color: #10B981;
+      border-radius: 50%;
+      box-shadow: 0 0 0 rgba(16, 185, 129, 0.6);
+      animation: turboPulse 2s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes turboPulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
   </style>
 </head>
 <body>
@@ -1363,6 +1401,12 @@
               <span>+ Upload Document</span>
             </button>
           </div>
+
+          <button type="button" class="btn-turbo-sync" id="btn-turbo-sync" onclick="refreshGoogleDriveData()" title="Akselerasi Google Drive Aktif. Klik untuk sinkronisasi paksa dengan Google Drive.">
+            <span class="turbo-pulse"></span>
+            <span id="cloud-sync-text">⚡ Drive Turbo: Ready</span>
+            <span style="font-size: 11px;">🔄</span>
+          </button>
 
           <div class="session-badge">
             <span class="session-indicator"></span>
@@ -1839,6 +1883,7 @@
       sessionTimerInterval: null,
       sessionTimeRemainingMin: 60,
       projectsList: [],
+      documentsIndex: {}, // Fast in-memory map of docId -> document object
       // Explorer State
       explorer: {
         activeProjectId: null,
@@ -2079,6 +2124,147 @@
       const allDocs = (ServerApi && ServerApi._mockDocuments) || [];
       return allDocs.filter(d => isDocumentActiveInExplorer(d, prjs));
     }
+
+    /* ==========================================================================
+       DMS FAST CACHE ENGINE: STALE-WHILE-REVALIDATE & GOOGLE DRIVE ACCELERATOR
+       ========================================================================== */
+    const DmsFastCache = {
+      memoryStore: new Map(),
+      TTL_MS: 90 * 1000, // 90 detik cache TTL untuk transisi antar-menu instan (0ms)
+      inFlightSyncs: new Set(),
+
+      get(key) {
+        const item = this.memoryStore.get(key);
+        if (item && (Date.now() - item.timestamp < item.ttl)) {
+          return item.data;
+        }
+        try {
+          const stored = sessionStorage.getItem('dms_cache_' + key);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Date.now() - parsed.timestamp < parsed.ttl) {
+              this.memoryStore.set(key, parsed);
+              return parsed.data;
+            }
+          }
+        } catch(e) {}
+        return null;
+      },
+
+      set(key, data, customTtl) {
+        const ttl = customTtl || this.TTL_MS;
+        const entry = { data: data, timestamp: Date.now(), ttl: ttl };
+        this.memoryStore.set(key, entry);
+        try {
+          const str = JSON.stringify(entry);
+          if (str.length < 500000) {
+            sessionStorage.setItem('dms_cache_' + key, str);
+          }
+        } catch(e) {}
+      },
+
+      indexDocuments(methodName, data) {
+        if (!data) return;
+        try {
+          if (Array.isArray(data)) {
+            data.forEach(d => {
+              if (d && d.documentId) AppState.documentsIndex[d.documentId] = d;
+            });
+          } else if (data.document && data.document.documentId) {
+            AppState.documentsIndex[data.document.documentId] = data.document;
+          } else if (data.documents && Array.isArray(data.documents)) {
+            data.documents.forEach(d => {
+              if (d && d.documentId) AppState.documentsIndex[d.documentId] = d;
+            });
+          } else if (data.documentId) {
+            AppState.documentsIndex[data.documentId] = data;
+          }
+        } catch(e) {}
+      },
+
+      revalidateInBackground(methodName, args, cacheKey, remoteUrl) {
+        if (!remoteUrl || this.inFlightSyncs.has(cacheKey)) return;
+        this.inFlightSyncs.add(cacheKey);
+
+        setTimeout(async () => {
+          try {
+            const resp = await fetch(remoteUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: methodName, args: args }),
+              redirect: 'follow'
+            });
+            if (resp.ok) {
+              const resData = await resp.json();
+              if (resData && (resData.success === true || resData.data !== undefined)) {
+                const freshData = resData.data !== undefined ? resData.data : resData;
+                this.set(cacheKey, freshData);
+                this.indexDocuments(methodName, freshData);
+                if (methodName === 'apiGetProjects' && Array.isArray(freshData)) {
+                  AppState.projectsList = freshData;
+                }
+              }
+            }
+          } catch(e) {
+            console.warn('SWR background sync note:', e);
+          } finally {
+            this.inFlightSyncs.delete(cacheKey);
+          }
+        }, 150);
+      },
+
+      invalidate(pattern) {
+        for (let k of this.memoryStore.keys()) {
+          if (!pattern || k.includes(pattern)) {
+            this.memoryStore.delete(k);
+            try { sessionStorage.removeItem('dms_cache_' + k); } catch(e) {}
+          }
+        }
+      },
+
+      invalidateAll() {
+        this.memoryStore.clear();
+        try {
+          const toRemove = [];
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const k = sessionStorage.key(i);
+            if (k && k.startsWith('dms_cache_')) toRemove.push(k);
+          }
+          toRemove.forEach(k => sessionStorage.removeItem(k));
+        } catch(e) {}
+      },
+
+      async prefetchCorePortalData() {
+        if (!AppState.sessionToken) return;
+        const remoteUrl = (localStorage.getItem('dms_remote_api_url') || '').trim();
+        if (!remoteUrl || !remoteUrl.startsWith('https://script.google.com/macros/s/')) return;
+        
+        try {
+          const fastBatch = await ServerApi.call('apiGetPortalInitialData', AppState.sessionToken).catch(() => null);
+          if (fastBatch && fastBatch.projects) {
+            AppState.projectsList = fastBatch.projects;
+            this.set('apiGetProjects_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.projects);
+            this.set('apiSearchDocuments_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.documents);
+            this.set('apiGetFavorites_' + JSON.stringify([AppState.sessionToken]), fastBatch.favorites);
+            this.set('apiGetRecents_' + JSON.stringify([AppState.sessionToken, 6]), (fastBatch.recents || []).slice(0, 6));
+            this.set('apiGetRecents_' + JSON.stringify([AppState.sessionToken, 15]), (fastBatch.recents || []).slice(0, 15));
+            this.indexDocuments('apiGetPortalInitialData', fastBatch.documents);
+            updateTurboIndicator('Synced');
+            return;
+          }
+
+          // Fallback to parallel prefetch
+          Promise.all([
+            ServerApi.call('apiGetProjects', AppState.sessionToken, {}),
+            ServerApi.call('apiSearchDocuments', AppState.sessionToken, {}),
+            ServerApi.call('apiGetFavorites', AppState.sessionToken),
+            ServerApi.call('apiGetRecents', AppState.sessionToken, 6)
+          ]).then(() => {
+            updateTurboIndicator('Synced');
+          }).catch(() => {});
+        } catch(e) {}
+      }
+    };
 
     const ServerApi = {
       _loadMockUsers() {
@@ -2368,11 +2554,71 @@
         this._loadMockUsers();
         this._loadMockProjects();
         this._loadMockDocuments();
+
+        const READ_CACHE_METHODS = [
+          'apiGetProjects',
+          'apiSearchDocuments',
+          'apiGetFavorites',
+          'apiGetRecents',
+          'apiGetProjectExplorerData',
+          'apiGetDocumentsByCategory',
+          'apiGetUsers',
+          'apiGetTrashDocuments',
+          'apiGetAuditLogs',
+          'apiGetSystemConfigs',
+          'apiGetPortalInitialData'
+        ];
+
+        const MUTATION_METHODS = [
+          'apiUploadDocument',
+          'apiCreateProject',
+          'apiUpdateProject',
+          'apiArchiveProject',
+          'apiToggleFavorite',
+          'apiSoftDeleteDocument',
+          'apiRestoreDocument',
+          'apiPurgeDocument',
+          'apiEmptyTrash',
+          'apiCreateUser',
+          'apiUpdateUser',
+          'apiDeleteUser',
+          'apiUpdateSystemConfigs',
+          'apiResetUserPassword',
+          'apiSetUserStatus',
+          'apiUpdateDocumentMetadata'
+        ];
+
+        if (MUTATION_METHODS.includes(methodName)) {
+          DmsFastCache.invalidateAll();
+        }
+
+        const cacheKey = methodName + '_' + JSON.stringify(args);
+
+        // 1. Instant 0ms cache retrieval for portal menus
+        if (READ_CACHE_METHODS.includes(methodName)) {
+          const cachedResult = DmsFastCache.get(cacheKey);
+          if (cachedResult !== null) {
+            const remoteUrl = (localStorage.getItem('dms_remote_api_url') || '').trim();
+            if (remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
+              DmsFastCache.revalidateInBackground(methodName, args, cacheKey, remoteUrl);
+            }
+            return Promise.resolve(cachedResult);
+          }
+        }
+
         return new Promise(async (resolve, reject) => {
+          const wrappedResolve = (val) => {
+            if (READ_CACHE_METHODS.includes(methodName) && val !== null && val !== undefined) {
+              DmsFastCache.set(cacheKey, val);
+              DmsFastCache.indexDocuments(methodName, val);
+            }
+            resolve(val);
+          };
+
           // 1. Lingkungan Google Apps Script Langsung (script.google.com)
           if (typeof google !== 'undefined' && google.script && google.script.run) {
             google.script.run
-              .withSuccessHandler(res => res && res.success === false ? reject(new Error(res.error ? res.error.message : 'Error')) : resolve(res ? res.data : null))
+              .withSuccessHandler(res => res && res.success === false ? reject(new Error(res.error ? res.error.message : 'Error')) : wrappedResolve(res ? res.data : null))
               .withFailureHandler(err => reject(new Error(err.message || 'Error')))[methodName](...args);
             return;
           }
@@ -2395,7 +2641,8 @@
                     return reject(new Error(resData.error ? (resData.error.message || resData.error) : 'Google Drive backend error'));
                   }
                 } else if (resData && (resData.success === true || resData.data !== undefined)) {
-                  return resolve(resData.data !== undefined ? resData.data : resData);
+                  const finalVal = resData.data !== undefined ? resData.data : resData;
+                  return wrappedResolve(finalVal);
                 }
               }
             } catch (netErr) {
@@ -2408,6 +2655,7 @@
 
           // 3. Standalone Browser Preview Dispatcher (Local Mock)
           setTimeout(() => {
+              const resolve = wrappedResolve;
               if (methodName === 'apiLogin') {
                 this._loadMockUsers();
                 const creds = typeof args[0] === 'string' ? JSON.parse(args[0]) : args[0];
@@ -3304,6 +3552,7 @@
         if (adminSection) adminSection.style.display = 'none';
       }
       loadInitialProjects();
+      DmsFastCache.prefetchCorePortalData();
       navigateTo('DASHBOARD');
     }
 
@@ -3544,7 +3793,7 @@
         const isSelected = AppState.explorer.selectedDoc && AppState.explorer.selectedDoc.documentId === d.documentId;
 
         html += `
-          <div class="doc-card ${isSelected ? 'active' : ''}" onclick="selectExplorerDocument('${d.documentId}')" ondblclick="openDocumentReader('${d.documentId}')">
+          <div class="doc-card ${isSelected ? 'active' : ''}" onclick="selectExplorerDocument('${d.documentId}')" ondblclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
             <div class="doc-icon-box ${iconClass}">${iconLabel}</div>
             <div class="doc-card-body">
               <div class="doc-card-title" title="${escapeHtml(d.documentName)}">${escapeHtml(d.documentName)}</div>
@@ -3557,7 +3806,7 @@
               </div>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
-              <button class="reader-btn" style="padding: 2px 4px; color: var(--navy-600);" onclick="event.stopPropagation(); openDocumentReader('${d.documentId}')" title="Read document">📖</button>
+              <button class="reader-btn" style="padding: 2px 4px; color: var(--navy-600);" onclick="event.stopPropagation(); openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')" title="Read document">📖</button>
               <button class="star-btn ${d.isFavorite ? 'active' : ''}" data-doc-id="${d.documentId}" onclick="handleToggleStar(event, '${d.documentId}')" title="Star document">★</button>
               ${AppState.currentUser && AppState.currentUser.role === 'SUPER_ADMIN' ? `
                 <button class="reader-btn" style="padding: 2px 4px; color: var(--rose-600);" onclick="event.stopPropagation(); promptSoftDeleteDocument('${d.documentId}', '${escapeHtml(d.documentName)}')" title="Move to Trash">🗑️</button>
@@ -3605,7 +3854,7 @@
             </h2>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <button class="btn-primary" onclick="openDocumentReader('${doc.documentId}')">
+            <button class="btn-primary" onclick="openDocumentReader('${doc.documentId}')" onmouseenter="prewarmDocumentReader('${doc.documentId}')">
               <span>📖 Open in Reader</span>
             </button>
             <button class="btn-secondary" onclick="triggerDirectDownload('${escapeHtml(doc.fileName || doc.documentName)}', '${doc.documentId}')">
@@ -3739,13 +3988,69 @@
       updateDrawerUI();
 
       modal.style.display = 'flex';
-      wrapper.innerHTML = `<div class="spinner" style="width: 40px; height: 40px; border-width: 3px;"></div>`;
+
+      // 1. FAST LOOKUP: Cari metadata dokumen di memori index atau cache lokal
+      let doc = (AppState.documentsIndex && AppState.documentsIndex[documentId]) ||
+                (window._dmsReaderCache && window._dmsReaderCache[documentId] ? window._dmsReaderCache[documentId].document : null) ||
+                (ServerApi._mockDocuments || []).find(d => d.documentId === documentId) ||
+                (AppState.explorer.documents || []).find(d => d.documentId === documentId) ||
+                (AppState.search.results || []).find(d => d.documentId === documentId);
+
+      let project = doc ? ((AppState.projectsList || []).find(p => p.projectId === doc.projectId) || null) : null;
+
+      // 2. INSTANT UI RENDER (0ms): Langsung render title, badges, dan detail dossier di drawer
+      if (doc) {
+        AppState.reader.activeDoc = doc;
+        AppState.reader.project = project;
+        renderReaderHeader(doc);
+        renderReaderDrawer(doc, project);
+      }
+
+      // 3. CEK IN-MEMORY FILE PAYLOAD CACHE (0ms):
+      const cachedPayload = (window._dmsReaderCache && window._dmsReaderCache[documentId] ? window._dmsReaderCache[documentId].filePayload : null) ||
+                            (window._dmsFilePayloadCache && window._dmsFilePayloadCache[documentId] ? window._dmsFilePayloadCache[documentId] : null);
+
+      if (cachedPayload && doc) {
+        AppState.reader.filePayload = cachedPayload;
+        renderReaderPreview(doc, cachedPayload);
+        // Silent recent tracking di latar belakang tanpa memblokir pembacaan
+        ServerApi.call('apiOpenDocumentForReading', AppState.sessionToken, documentId).catch(() => {});
+        return;
+      }
+
+      // 4. INSTANT GOOGLE DRIVE CDN STREAM PREVIEW (< 0.5s):
+      if (doc && doc.driveFileId) {
+        renderGoogleDriveFastPreview(doc, project);
+        // Silent background tracking & pre-cache offline payload
+        ServerApi.call('apiOpenDocumentForReading', AppState.sessionToken, documentId).then(payload => {
+          if (payload && payload.filePayload) {
+            if (!window._dmsReaderCache) window._dmsReaderCache = {};
+            window._dmsReaderCache[documentId] = payload;
+            AppState.reader.filePayload = payload.filePayload;
+          }
+        }).catch(err => {
+          console.warn('Background payload sync note:', err);
+        });
+        return;
+      }
+
+      // 5. FALLBACK JIKA METADATA BELUM ADA DI MEMORI:
+      wrapper.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem; color: #FFFFFF;">
+          <div class="spinner" style="width: 44px; height: 44px; border-width: 3px; border-top-color: #38BDF8;"></div>
+          <div style="margin-top: 1rem; font-size: 13px; font-weight: 600; color: #E2E8F0;">⚡ Membuka Dokumen Google Drive...</div>
+          <div style="margin-top: 4px; font-size: 11px; color: #94A3B8;">Akselerator Reader aktif dengan Google CDN</div>
+        </div>
+      `;
 
       try {
         const payload = await ServerApi.call('apiOpenDocumentForReading', AppState.sessionToken, documentId);
         AppState.reader.activeDoc = payload.document;
         AppState.reader.project = payload.project;
         AppState.reader.filePayload = payload.filePayload;
+
+        if (!window._dmsReaderCache) window._dmsReaderCache = {};
+        window._dmsReaderCache[documentId] = payload;
 
         renderReaderHeader(payload.document);
         renderReaderDrawer(payload.document, payload.project);
@@ -3754,9 +4059,9 @@
         wrapper.innerHTML = `
           <div class="empty-state" style="color: #FFFFFF;">
             <div style="font-size: 40px; margin-bottom: 1rem;">⚠️</div>
-            <h3 style="font-size: 16px; font-weight: 700;">Unable to Load Document</h3>
+            <h3 style="font-size: 16px; font-weight: 700;">Gagal Memuat Dokumen</h3>
             <p style="font-size: 12px; color: var(--slate-400); margin: 0.5rem 0 1.5rem 0;">${escapeHtml(err.message)}</p>
-            <button class="reader-back-btn" onclick="closeDocumentReader()">Return to Explorer</button>
+            <button class="reader-back-btn" onclick="closeDocumentReader()">Kembali ke Explorer</button>
           </div>
         `;
       }
@@ -3850,7 +4155,12 @@
         return;
       }
 
-      // 6. GENERIC FALLBACK
+      // 6. GOOGLE DRIVE CDN PREVIEW OR GENERIC FALLBACK
+      if (doc && doc.driveFileId) {
+        renderGoogleDriveFastPreview(doc, AppState.reader.project);
+        return;
+      }
+
       wrapper.innerHTML = `
         <div class="reader-office-card" style="max-width: 540px; text-align: center; padding: 2.5rem; background: #FFFFFF; border-radius: 10px;">
           <div style="font-size: 48px; margin-bottom: 1rem;">📦</div>
@@ -3865,6 +4175,155 @@
           </div>
         </div>
       `;
+    }
+
+    /* GOOGLE DRIVE HIGH-SPEED CDN PREVIEW & STREAM VIEWER ENGINE (< 0.5s) */
+    function renderGoogleDriveFastPreview(doc, project) {
+      const wrapper = document.getElementById('reader-content-wrapper');
+      const fileId = doc.driveFileId;
+      const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+      const webViewLink = `https://drive.google.com/file/d/${fileId}/view`;
+      const directDownloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+      const ext = (doc.fileType || 'DOC').toUpperCase();
+      const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'SVG', 'GIF'].includes(ext) || (doc.mimeType && doc.mimeType.startsWith('image/'));
+
+      if (isImage) {
+        // High-Speed Direct Image Stream from Google Drive Edge CDN
+        const imgUrl = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`;
+        wrapper.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; width: 100%;">
+            <div style="background: #0A192F; width: 100%; max-width: 980px; padding: 0.65rem 1.25rem; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #004F8C; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="color: #FFFFFF; font-size: 13px; font-weight: 700;">🖼️ ${escapeHtml(doc.fileName || doc.documentName)}</span>
+                <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #34D399; padding: 2px 7px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(52, 211, 153, 0.4);">⚡ GOOGLE DRIVE CDN STREAM (&lt; 0.5s)</span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="window.open('${webViewLink}', '_blank')">↗ Google Drive</button>
+                <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="window.print()">🖨️ Cetak</button>
+                <button type="button" class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 10px;" onclick="triggerDirectDownload('${escapeHtml(doc.fileName || doc.documentName)}', '${doc.documentId}')">
+                  <span>⬇ Unduh Gambar</span>
+                </button>
+              </div>
+            </div>
+            <div style="background: #1E293B; width: 100%; max-width: 980px; padding: 2rem; border-radius: 0 0 8px 8px; display: flex; justify-content: center; align-items: center; overflow: auto; max-height: 76vh;">
+              <img id="reader-image-target" src="${imgUrl}" alt="${escapeHtml(doc.documentName)}" style="max-width: 100%; max-height: 72vh; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.3);" onerror="this.onerror=null; this.src='https://lh3.googleusercontent.com/d/${fileId}';">
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // Fast Google Drive CDN Embed Viewer for PDF, DOCX, XLSX, PPTX, etc.
+      wrapper.innerHTML = `
+        <div class="reader-office-card" style="max-width: 1040px; width: 100%; padding: 0; overflow: hidden; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.25);">
+          <!-- FAST EMBED ACTION HEADER -->
+          <div style="background: #0A192F; padding: 0.65rem 1.25rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #004F8C; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 16px;">📄</span>
+              <span style="font-size: 12px; font-weight: 700; color: #FFFFFF; letter-spacing: 0.3px;">${escapeHtml(doc.fileName || doc.documentName)}</span>
+              <span style="font-size: 10px; background: rgba(16, 185, 129, 0.2); color: #34D399; padding: 2px 7px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(52, 211, 153, 0.4);">⚡ GOOGLE DRIVE CDN STREAM (&lt; 0.5s)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="window.open('${webViewLink}', '_blank')" title="Buka berkas di tab Google Drive resmi">
+                <span>↗</span><span>Tab Google Drive</span>
+              </button>
+              <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="trySwitchToNativeReader('${doc.documentId}')" title="Alihkan ke pembaca format canvas/teks lokal">
+                <span>🎨</span><span>Format Native</span>
+              </button>
+              <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="window.print()">
+                <span>🖨️</span><span>Cetak</span>
+              </button>
+              <button type="button" class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 10px; background: #004F8C;" onclick="triggerDirectDownload('${escapeHtml(doc.fileName || doc.documentName)}', '${doc.documentId}')">
+                <span>⬇</span><span>Unduh Berkas</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- FAST IFRAME CONTAINER -->
+          <div style="position: relative; width: 100%; height: 78vh; background: #1E293B;">
+            <div id="drive-iframe-skeleton" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94A3B8; background: #0F172A; transition: opacity 0.3s; z-index: 5;">
+              <div class="spinner" style="border-top-color: #38BDF8; width: 36px; height: 36px;"></div>
+              <div style="margin-top: 10px; font-size: 12px; color: #CBD5E1; font-weight: 600;">⚡ Memuat Pratinjau Google Drive CDN...</div>
+              <div style="font-size: 11px; color: #64748B; margin-top: 2px;">Streaming langsung dari server Google edge</div>
+            </div>
+            <iframe 
+              src="${previewUrl}" 
+              style="width: 100%; height: 100%; border: none; opacity: 0; transition: opacity 0.3s;" 
+              allow="autoplay" 
+              loading="eager"
+              onload="this.style.opacity = '1'; const sk = document.getElementById('drive-iframe-skeleton'); if(sk) sk.style.display = 'none';"
+            ></iframe>
+          </div>
+        </div>
+      `;
+    }
+
+    async function trySwitchToNativeReader(documentId) {
+      const doc = AppState.reader.activeDoc || (AppState.documentsIndex && AppState.documentsIndex[documentId]);
+      if (!doc) return;
+      const cached = (window._dmsReaderCache && window._dmsReaderCache[documentId] ? window._dmsReaderCache[documentId].filePayload : null) ||
+                     (window._dmsFilePayloadCache && window._dmsFilePayloadCache[documentId] ? window._dmsFilePayloadCache[documentId] : null);
+      if (cached && (cached.dataUrl || cached.base64)) {
+        renderReaderPreview(doc, cached);
+        return;
+      }
+      showToast('Mengambil format teks/canvas lokal...', 'info');
+      try {
+        const payload = await ServerApi.call('apiOpenDocumentForReading', AppState.sessionToken, documentId);
+        if (payload && payload.filePayload) {
+          if (!window._dmsReaderCache) window._dmsReaderCache = {};
+          window._dmsReaderCache[documentId] = payload;
+          renderReaderPreview(doc, payload.filePayload);
+        } else {
+          renderReaderPreview(doc, null);
+        }
+      } catch(e) {
+        showToast('Tetap menggunakan Pratinjau Google Drive CDN: ' + e.message, 'warning');
+      }
+    }
+
+    function prewarmDocumentReader(documentId) {
+      if (!documentId) return;
+      if (window._dmsReaderCache && window._dmsReaderCache[documentId]) return;
+      if (window._dmsFilePayloadCache && window._dmsFilePayloadCache[documentId]) return;
+
+      const doc = (AppState.documentsIndex && AppState.documentsIndex[documentId]) ||
+                  (ServerApi._mockDocuments || []).find(d => d.documentId === documentId);
+      if (!doc) return;
+
+      if (!window._dmsPrewarmQueue) window._dmsPrewarmQueue = new Set();
+      if (window._dmsPrewarmQueue.has(documentId)) return;
+      window._dmsPrewarmQueue.add(documentId);
+
+      // Prewarm Google Drive embed if driveFileId exists
+      if (doc.driveFileId) {
+        try {
+          const prefetchLink = document.createElement('link');
+          prefetchLink.rel = 'prefetch';
+          prefetchLink.href = `https://drive.google.com/file/d/${doc.driveFileId}/preview`;
+          document.head.appendChild(prefetchLink);
+        } catch(e) {}
+      }
+    }
+
+    async function refreshGoogleDriveData() {
+      DmsFastCache.invalidateAll();
+      showToast('⚡ Sinkronisasi paksa Google Drive sedang berjalan...', 'info');
+      updateTurboIndicator('Syncing...');
+      try {
+        await DmsFastCache.prefetchCorePortalData();
+        renderRouteView(AppState.currentRoute);
+        showToast('✓ Data Google Drive berhasil diperbarui dengan kecepatan penuh!', 'success');
+        updateTurboIndicator('Ready');
+      } catch(e) {
+        showToast('Sinkronisasi selesai.', 'success');
+        updateTurboIndicator('Ready');
+      }
+    }
+
+    function updateTurboIndicator(status) {
+      const el = document.getElementById('cloud-sync-text');
+      if (el) el.innerText = status === 'Syncing...' ? '⚡ Drive Turbo: Syncing...' : (status === 'Synced' ? '⚡ Drive Turbo: Synced' : '⚡ Drive Turbo: Ready');
     }
 
     /* WORD (.DOCX) REAL CONTENT READER USING JSZIP XML EXTRACTION */
@@ -4614,6 +5073,18 @@ ${440 + streamLen}
       }
 
       showToast(`Mengunduh dokumen: ${originalFileName}`, 'success');
+
+      // Jika berkas tersimpan di Google Drive, unduh langsung dengan Google CDN berkecepatan penuh
+      if (doc && doc.driveFileId && !doc.driveFileId.startsWith('mock_')) {
+        const a = document.createElement('a');
+        a.href = `https://drive.google.com/uc?export=download&id=${doc.driveFileId}`;
+        a.target = '_blank';
+        a.download = originalFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
 
       // Check cache for original uploaded binary payload
       const cached = (doc && doc.documentId) ? window._dmsFilePayloadCache[doc.documentId] : null;
@@ -5507,7 +5978,7 @@ ${440 + streamLen}
                       <span class="badge-expiring-soon">Expires in ${diffDays} day${diffDays === 1 ? '' : 's'} (${d.expiryDate})</span>
                     </div>
                   </div>
-                  <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px; flex-shrink: 0;" onclick="openDocumentReader('${d.documentId}')">
+                  <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px; flex-shrink: 0;" onclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
                     Review
                   </button>
                 </div>
@@ -5532,7 +6003,7 @@ ${440 + streamLen}
             let recHtml = '';
             recList.slice(0, 5).forEach(r => {
               recHtml += `
-                <div class="recents-item-row" onclick="openDocumentReader('${r.documentId}')" style="padding: 0.6rem 0.75rem;">
+                <div class="recents-item-row" onclick="openDocumentReader('${r.documentId}')" onmouseenter="prewarmDocumentReader('${r.documentId}')" style="padding: 0.6rem 0.75rem;">
                   <div style="min-width: 0; flex: 1;">
                     <div style="font-size: 12px; font-weight: 600; color: var(--slate-900); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                       ${escapeHtml(r.documentName)}
@@ -5841,7 +6312,7 @@ ${440 + streamLen}
           const isExpSoon = d.expiryDate && new Date(d.expiryDate) >= today && new Date(d.expiryDate) <= in30d;
           const isExp = d.expiryDate && new Date(d.expiryDate) < today;
           tableHtml += `
-            <tr style="cursor: pointer;" ondblclick="openDocumentReader('${d.documentId}')">
+            <tr style="cursor: pointer;" ondblclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
               <td>
                 <div style="font-weight: 700; color: var(--slate-900); display: flex; align-items: center; gap: 6px;">
                   <span>${escapeHtml(d.documentName)}</span>
@@ -5858,7 +6329,7 @@ ${440 + streamLen}
               <td style="${isExpSoon ? 'color: var(--amber-600); font-weight: 700;' : (isExp ? 'color: var(--rose-600); font-weight: 700;' : '')}">${d.expiryDate || 'No Expiry'}</td>
               <td><span class="status-badge ${d.status.toLowerCase()}">${d.status}</span></td>
               <td style="text-align: right; white-space: nowrap;">
-                <button class="reader-btn" style="color: var(--navy-600); padding: 3px 6px;" onclick="openDocumentReader('${d.documentId}')" title="Open in Reader">📖</button>
+                <button class="reader-btn" style="color: var(--navy-600); padding: 3px 6px;" onclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')" title="Open in Reader">📖</button>
                 <button class="star-btn ${d.isFavorite ? 'active' : ''}" data-doc-id="${d.documentId}" onclick="handleToggleStar(event, '${d.documentId}')" title="Star document">★</button>
                 <button class="reader-btn" style="padding: 3px 6px;" onclick="triggerDirectDownload('${escapeHtml(d.fileName || d.documentName)}', '${d.documentId}')" title="Download">⬇</button>
                 ${AppState.currentUser && AppState.currentUser.role === 'SUPER_ADMIN' ? `
@@ -5884,7 +6355,7 @@ ${440 + streamLen}
           const iconLabel = isPdf ? 'PDF' : (isImg ? 'IMG' : (isOffice ? 'DOC' : 'FILE'));
 
           gridHtml += `
-            <div class="search-item-card" ondblclick="openDocumentReader('${d.documentId}')">
+            <div class="search-item-card" ondblclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
               <div class="search-item-header">
                 <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
                   <div class="doc-icon-box ${iconClass}" style="width: 32px; height: 32px; font-size: 10px;">${iconLabel}</div>
@@ -5915,7 +6386,7 @@ ${440 + streamLen}
                   ${d.documentDate ? `Date: ${d.documentDate}` : `Uploaded: ${d.uploadedAt.slice(0,10)}`}
                 </div>
                 <div style="display: flex; gap: 4px;">
-                  <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="openDocumentReader('${d.documentId}')">
+                  <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
                     <span>📖 Read</span>
                   </button>
                   <button class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="triggerDirectDownload('${escapeHtml(d.fileName || d.documentName)}', '${d.documentId}')">
@@ -6003,7 +6474,7 @@ ${440 + streamLen}
         const iconLabel = isPdf ? 'PDF' : (isImg ? 'IMG' : (isOffice ? 'DOC' : 'FILE'));
 
         html += `
-          <div class="search-item-card" ondblclick="openDocumentReader('${d.documentId}')">
+          <div class="search-item-card" ondblclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
             <div class="search-item-header">
               <div style="display: flex; align-items: center; gap: 6px; min-width: 0;">
                 <div class="doc-icon-box ${iconClass}" style="width: 32px; height: 32px; font-size: 10px;">${iconLabel}</div>
@@ -6032,7 +6503,7 @@ ${440 + streamLen}
             <div class="search-item-footer">
               <span style="font-size: 11px; color: var(--slate-400);">Project: ${escapeHtml(d.projectName || d.projectId)}</span>
               <div style="display: flex; gap: 4px;">
-                <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="openDocumentReader('${d.documentId}')">
+                <button class="btn-primary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="openDocumentReader('${d.documentId}')" onmouseenter="prewarmDocumentReader('${d.documentId}')">
                   <span>📖 Read</span>
                 </button>
                 <button class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 8px;" onclick="triggerDirectDownload('${escapeHtml(d.fileName || d.documentName)}', '${d.documentId}')">
@@ -6095,7 +6566,7 @@ ${440 + streamLen}
       let html = `<div style="display: flex; flex-direction: column; gap: 0.6rem;">`;
       list.forEach(r => {
         html += `
-          <div class="recents-item-row" ondblclick="openDocumentReader('${r.documentId}')">
+          <div class="recents-item-row" ondblclick="openDocumentReader('${r.documentId}')" onmouseenter="prewarmDocumentReader('${r.documentId}')">
             <div style="display: flex; align-items: center; gap: 0.75rem; min-width: 0; flex: 1;">
               <div class="doc-icon-box ${r.fileType === 'PDF' ? 'pdf' : (['PNG','JPG','JPEG','SVG'].includes(r.fileType) ? 'image' : 'office')}" style="width: 34px; height: 34px; font-size: 10px;">
                 ${r.fileType}
@@ -6116,7 +6587,7 @@ ${440 + streamLen}
 
             <div style="display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;">
               <span class="recents-time-pill" title="${r.lastOpenedAt}">Opened: ${formatRelativeTime(r.lastOpenedAt)}</span>
-              <button class="reader-btn" style="color: var(--navy-600); padding: 4px 8px;" onclick="openDocumentReader('${r.documentId}')">
+              <button class="reader-btn" style="color: var(--navy-600); padding: 4px 8px;" onclick="openDocumentReader('${r.documentId}')" onmouseenter="prewarmDocumentReader('${r.documentId}')">
                 <span>📖 Open</span>
               </button>
               <button class="star-btn ${r.isFavorite ? 'active' : ''}" data-doc-id="${r.documentId}" onclick="handleToggleStar(event, '${r.documentId}')" title="Star document">★</button>

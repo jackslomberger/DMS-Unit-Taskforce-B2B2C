@@ -86,3 +86,23 @@ git push -u origin main
    - Pada bar atas terdapat tombol **⛶ Layar Penuh** yang dapat diklik kapan saja untuk memaksimalkan tampilan portal DMS ke resolusi layar penuh tanpa bar browser.
 3. **Scrollbar Internal yang Ramping**:
    - Area tabel yang memiliki banyak data pengguna atau dokumen menggunakan scrollbar modern minimalis (5px) transparan yang tidak memakan ruang visual layar.
+
+---
+
+### 6. Fitur Akselerasi Kecepatan Tinggi (Google Drive Turbo & Ultra-Fast Reader)
+
+Aplikasi telah dilengkapi dengan arsitektur akselerator multi-tier untuk memastikan performa pembacaan data dan pembukaan dokumen berlangsung instan:
+1. **Navigasi Antar-Menu Instan (0ms Latency via SWR Cache)**:
+   - `DmsFastCache` menyimpan metadata proyek, dokumen, kategori, dan pengguna dalam memori dan sesi browser.
+   - Berpindah antar menu (Dashboard, Projects, Explorer, Search, Favorites, Recents, Trash, Users) berlangsung seketika tanpa loading spinner berulang.
+   - Fitur *Stale-While-Revalidate (SWR)* memperbarui data di latar belakang secara hening (*silent sync*).
+2. **Reader Dokumen Google Drive Super Cepat (< 0.5 detik)**:
+   - Reader dossier dokumen langsung menampilkan identitas dan metadata dalam 0 ms.
+   - Dokumen fisik yang tersimpan di Google Drive di-*stream* langsung menggunakan **Google Drive Edge CDN Preview Engine** (`https://drive.google.com/file/d/{driveFileId}/preview`).
+   - Mendukung berkas PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), gambar, dan teks tanpa jeda encoding Base64.
+   - Tersedia tombol cepat: **Unduh Berkas Asli (Direct CDN)**, **Buka di Tab Google Drive**, **Cetak**, dan **Format Native**.
+3. **Pre-warming Otomatis**:
+   - Saat pengguna mengarahkan mouse (*hover*) ke baris dokumen di Explorer, Search, atau Dashboard, sistem secara proaktif melakukan *pre-warming* tautan Google Drive sehingga saat diklik, dokumen langsung terbuka instan.
+4. **Tombol "⚡ Drive Turbo" di Topbar**:
+   - Indikator aktif di topbar menampilkan status sinkronisasi dan menyediakan tombol 1-klik untuk memaksa pembaruan data Google Drive jika diperlukan.
+

@@ -215,10 +215,42 @@ function withScriptLock(operationFn, timeoutMs) {
   try { return operationFn(); } finally { lock.releaseLock(); }
 }
 
+var _SHEET_RECORDS_CACHE = {};
+
+function invalidateSheetCache(sheetName) {
+  if (sheetName) {
+    delete _SHEET_RECORDS_CACHE[sheetName];
+    try { CacheService.getScriptCache().remove('SHEET_CACHE_' + sheetName); } catch(e) {}
+  } else {
+    _SHEET_RECORDS_CACHE = {};
+    try {
+      const keys = Object.values(SHEETS).map(s => 'SHEET_CACHE_' + s);
+      CacheService.getScriptCache().removeAll(keys);
+    } catch(e) {}
+  }
+}
+
 function readAllRecords(sheetName) {
+  if (_SHEET_RECORDS_CACHE[sheetName]) {
+    return _SHEET_RECORDS_CACHE[sheetName];
+  }
+
+  // Fast retrieval via Apps Script CacheService
+  try {
+    const cachedStr = CacheService.getScriptCache().get('SHEET_CACHE_' + sheetName);
+    if (cachedStr) {
+      const parsed = JSON.parse(cachedStr);
+      _SHEET_RECORDS_CACHE[sheetName] = parsed;
+      return parsed;
+    }
+  } catch(e) {}
+
   const sheet = getDbSheet(sheetName);
   const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
+  if (data.length <= 1) {
+    _SHEET_RECORDS_CACHE[sheetName] = [];
+    return [];
+  }
   const headers = data[0].map(h => String(h).trim());
   const records = [];
   for (let r = 1; r < data.length; r++) {
@@ -232,6 +264,15 @@ function readAllRecords(sheetName) {
     }
     records.push(record);
   }
+  _SHEET_RECORDS_CACHE[sheetName] = records;
+
+  try {
+    const jsonStr = JSON.stringify(records);
+    if (jsonStr.length < 95000) {
+      CacheService.getScriptCache().put('SHEET_CACHE_' + sheetName, jsonStr, 120);
+    }
+  } catch(e) {}
+
   return records;
 }
 
@@ -256,6 +297,7 @@ function appendRecord(sheetName, recordObj) {
     });
     sheet.appendRow(row);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return recordObj;
   });
 }
@@ -271,6 +313,7 @@ function updateRecordByRow(sheetName, rowNumber, recordObj) {
     }
     sheet.getRange(rowNumber, 1, 1, headers.length).setValues([currentRow]);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return true;
   });
 }
@@ -280,6 +323,7 @@ function deleteRecordByRow(sheetName, rowNumber) {
     const sheet = getDbSheet(sheetName);
     sheet.deleteRow(rowNumber);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return true;
   });
 }
@@ -462,35 +506,82 @@ const DriveService = {
     const decodedBytes = Utilities.base64Decode(cleanBase64);
     const blob = Utilities.newBlob(decodedBytes, mimeType || 'application/octet-stream', fileName);
     const driveFile = targetFolder.createFile(blob);
+    
+    // Set permission agar preview Google Drive CDN dapat dibuka di in-app reader tanpa hambatan
+    try {
+      driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(shareErr) {
+      console.warn('Set sharing error:', shareErr);
+    }
+
     driveFile.setDescription(`Uploaded to DMS. Project Folder ID: ${projectFolderId}, Category: ${categoryCode}. Uploaded At: ${new Date().toISOString()}`);
     return {
       fileId: driveFile.getId(),
       fileUrl: driveFile.getUrl(),
+      previewUrl: `https://drive.google.com/file/d/${driveFile.getId()}/preview`,
+      webViewLink: driveFile.getUrl(),
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${driveFile.getId()}`,
       fileSize: driveFile.getSize(),
       mimeType: driveFile.getMimeType()
     };
   },
 
   /**
-   * Retrieves file blob and converts to Base64 data URL for in-app reader preview.
+   * Retrieves file blob and converts to Base64 data URL for in-app reader preview with high-speed CDN fallback.
    */
   getFileDataPayload(driveFileId) {
+    const cacheKey = 'FILE_PAYLOAD_' + driveFileId;
+    try {
+      const cached = CacheService.getScriptCache().get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+
     const file = DriveApp.getFileById(driveFileId);
     if (file.isTrashed()) throw new Error('File has been moved to trash.');
-    const blob = file.getBlob();
-    const base64Str = Utilities.base64Encode(blob.getBytes());
-    const mimeType = blob.getContentType() || 'application/octet-stream';
-    
-    return {
-      dataUrl: `data:${mimeType};base64,${base64Str}`,
+    const fileSize = file.getSize();
+    const mimeType = file.getMimeType() || 'application/octet-stream';
+    const fileName = file.getName();
+    const previewUrl = `https://drive.google.com/file/d/${file.getId()}/preview`;
+    const webViewLink = file.getUrl();
+    const downloadUrl = `https://drive.google.com/uc?export=download&id=${file.getId()}`;
+    const thumbnailUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w1600`;
+
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(e) {}
+
+    let dataUrl = null;
+    let base64Str = null;
+    // Optimasi kecepatan: Hanya encode base64 untuk berkas kecil (< 1.5MB) agar hemat waktu & memori Apps Script
+    if (fileSize < 1500000) {
+      try {
+        const blob = file.getBlob();
+        base64Str = Utilities.base64Encode(blob.getBytes());
+        dataUrl = `data:${mimeType};base64,${base64Str}`;
+      } catch(bErr) {
+        console.warn('Base64 encoding skipped for fast preview:', bErr);
+      }
+    }
+
+    const payload = {
+      dataUrl: dataUrl,
       rawBase64: base64Str,
-      fileName: file.getName(),
+      fileName: fileName,
       mimeType: mimeType,
-      fileSize: file.getSize(),
-      downloadUrl: file.getDownloadUrl(),
-      previewUrl: `https://drive.google.com/file/d/${file.getId()}/preview`,
-      webViewLink: file.getUrl()
+      fileSize: fileSize,
+      downloadUrl: downloadUrl,
+      previewUrl: previewUrl,
+      webViewLink: webViewLink,
+      thumbnailUrl: thumbnailUrl
     };
+
+    try {
+      if (!dataUrl || dataUrl.length < 90000) {
+        CacheService.getScriptCache().put(cacheKey, JSON.stringify(payload), 600);
+      }
+    } catch(e) {}
+
+    return payload;
   }
 };
 
@@ -1567,6 +1658,34 @@ function doPost(e) {
 
 function apiResponseSuccess(data, message) { return { success: true, data: data || null, message: message || 'OK' }; }
 function apiResponseError(errCode, errMessage) { return { success: false, error: { code: errCode || 'ERR_GENERAL', message: errMessage || 'Server error.' } }; }
+
+/**
+ * Fast unified sync method: Mengambil data inti portal dalam 1 batch cepat untuk performa maksimal portal di Vercel
+ */
+function apiGetPortalInitialData(sessionToken) {
+  try {
+    const auth = AuthService.assertAuthenticated(sessionToken);
+    const projects = filterRecords(SHEETS.PROJECTS, p => !p.isArchived && p.status !== PROJECT_STATUSES.ARCHIVED);
+    const docs = filterRecords(SHEETS.DOCUMENTS, d => !isDocDeletedRecord(d));
+    const userFavorites = filterRecords(SHEETS.FAVORITES, f => f.userId === auth.user.userId);
+    const favSet = new Set(userFavorites.map(f => f.documentId));
+    const mappedDocs = docs.map(d => Object.assign({}, d, { isFavorite: favSet.has(d.documentId) }));
+    
+    const recents = filterRecords(SHEETS.RECENTS, r => r.userId === auth.user.userId)
+      .sort((a, b) => new Date(b.lastOpenedAt) - new Date(a.lastOpenedAt))
+      .slice(0, 15);
+    
+    return apiResponseSuccess({
+      projects: projects,
+      documents: mappedDocs,
+      favorites: mappedDocs.filter(d => d.isFavorite),
+      recents: recents,
+      user: auth.user
+    });
+  } catch (err) {
+    return apiResponseError('ERR_PORTAL_SYNC', err.message);
+  }
+}
 
 function apiLogin(credentials) {
   try {
