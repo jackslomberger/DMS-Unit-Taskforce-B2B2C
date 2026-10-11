@@ -192,17 +192,47 @@ function getDatabaseSpreadsheet() {
   if (configuredSheetId) {
     try { return SpreadsheetApp.openById(configuredSheetId); } catch (e) {}
   }
-  const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (active) {
-    props.setProperty('DMS_SPREADSHEET_ID', active.getId());
-    return active;
-  }
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) {
+      props.setProperty('DMS_SPREADSHEET_ID', active.getId());
+      return active;
+    }
+  } catch (e) {}
+
+  // Auto-discover existing DMS_DATABASE_MASTER in Google Drive
+  try {
+    const files = DriveApp.getFilesByName('DMS_DATABASE_MASTER');
+    while (files.hasNext()) {
+      const file = files.next();
+      if (!file.isTrashed()) {
+        props.setProperty('DMS_SPREADSHEET_ID', file.getId());
+        return SpreadsheetApp.openById(file.getId());
+      }
+    }
+  } catch (e) {}
+
+  // Auto-create DMS_DATABASE_MASTER if not found
+  try {
+    const newSs = SpreadsheetApp.create('DMS_DATABASE_MASTER');
+    props.setProperty('DMS_SPREADSHEET_ID', newSs.getId());
+    return newSs;
+  } catch (e) {}
+
   throw new Error('Database Error: No active spreadsheet or DMS_SPREADSHEET_ID found.');
 }
 
 function getDbSheet(sheetName) {
   const ss = getDatabaseSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
+  let sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    try {
+      setupDMS();
+      sheet = ss.getSheetByName(sheetName);
+    } catch (e) {
+      console.warn('Auto setupDMS triggered in getDbSheet:', e);
+    }
+  }
   if (!sheet) throw new Error(`Database Error: Required table '${sheetName}' does not exist. Run setupDMS() first.`);
   return sheet;
 }
@@ -215,10 +245,42 @@ function withScriptLock(operationFn, timeoutMs) {
   try { return operationFn(); } finally { lock.releaseLock(); }
 }
 
+var _SHEET_RECORDS_CACHE = {};
+
+function invalidateSheetCache(sheetName) {
+  if (sheetName) {
+    delete _SHEET_RECORDS_CACHE[sheetName];
+    try { CacheService.getScriptCache().remove('SHEET_CACHE_' + sheetName); } catch(e) {}
+  } else {
+    _SHEET_RECORDS_CACHE = {};
+    try {
+      const keys = Object.values(SHEETS).map(s => 'SHEET_CACHE_' + s);
+      CacheService.getScriptCache().removeAll(keys);
+    } catch(e) {}
+  }
+}
+
 function readAllRecords(sheetName) {
+  if (_SHEET_RECORDS_CACHE[sheetName]) {
+    return _SHEET_RECORDS_CACHE[sheetName];
+  }
+
+  // Fast retrieval via Apps Script CacheService
+  try {
+    const cachedStr = CacheService.getScriptCache().get('SHEET_CACHE_' + sheetName);
+    if (cachedStr) {
+      const parsed = JSON.parse(cachedStr);
+      _SHEET_RECORDS_CACHE[sheetName] = parsed;
+      return parsed;
+    }
+  } catch(e) {}
+
   const sheet = getDbSheet(sheetName);
   const data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
+  if (data.length <= 1) {
+    _SHEET_RECORDS_CACHE[sheetName] = [];
+    return [];
+  }
   const headers = data[0].map(h => String(h).trim());
   const records = [];
   for (let r = 1; r < data.length; r++) {
@@ -232,6 +294,15 @@ function readAllRecords(sheetName) {
     }
     records.push(record);
   }
+  _SHEET_RECORDS_CACHE[sheetName] = records;
+
+  try {
+    const jsonStr = JSON.stringify(records);
+    if (jsonStr.length < 95000) {
+      CacheService.getScriptCache().put('SHEET_CACHE_' + sheetName, jsonStr, 120);
+    }
+  } catch(e) {}
+
   return records;
 }
 
@@ -256,6 +327,7 @@ function appendRecord(sheetName, recordObj) {
     });
     sheet.appendRow(row);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return recordObj;
   });
 }
@@ -271,6 +343,7 @@ function updateRecordByRow(sheetName, rowNumber, recordObj) {
     }
     sheet.getRange(rowNumber, 1, 1, headers.length).setValues([currentRow]);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return true;
   });
 }
@@ -280,6 +353,7 @@ function deleteRecordByRow(sheetName, rowNumber) {
     const sheet = getDbSheet(sheetName);
     sheet.deleteRow(rowNumber);
     SpreadsheetApp.flush();
+    invalidateSheetCache(sheetName);
     return true;
   });
 }
@@ -462,35 +536,82 @@ const DriveService = {
     const decodedBytes = Utilities.base64Decode(cleanBase64);
     const blob = Utilities.newBlob(decodedBytes, mimeType || 'application/octet-stream', fileName);
     const driveFile = targetFolder.createFile(blob);
+    
+    // Set permission agar preview Google Drive CDN dapat dibuka di in-app reader tanpa hambatan
+    try {
+      driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(shareErr) {
+      console.warn('Set sharing error:', shareErr);
+    }
+
     driveFile.setDescription(`Uploaded to DMS. Project Folder ID: ${projectFolderId}, Category: ${categoryCode}. Uploaded At: ${new Date().toISOString()}`);
     return {
       fileId: driveFile.getId(),
       fileUrl: driveFile.getUrl(),
+      previewUrl: `https://drive.google.com/file/d/${driveFile.getId()}/preview`,
+      webViewLink: driveFile.getUrl(),
+      downloadUrl: `https://drive.google.com/uc?export=download&id=${driveFile.getId()}`,
       fileSize: driveFile.getSize(),
       mimeType: driveFile.getMimeType()
     };
   },
 
   /**
-   * Retrieves file blob and converts to Base64 data URL for in-app reader preview.
+   * Retrieves file blob and converts to Base64 data URL for in-app reader preview with high-speed CDN fallback.
    */
   getFileDataPayload(driveFileId) {
+    const cacheKey = 'FILE_PAYLOAD_' + driveFileId;
+    try {
+      const cached = CacheService.getScriptCache().get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch(e) {}
+
     const file = DriveApp.getFileById(driveFileId);
     if (file.isTrashed()) throw new Error('File has been moved to trash.');
-    const blob = file.getBlob();
-    const base64Str = Utilities.base64Encode(blob.getBytes());
-    const mimeType = blob.getContentType() || 'application/octet-stream';
-    
-    return {
-      dataUrl: `data:${mimeType};base64,${base64Str}`,
+    const fileSize = file.getSize();
+    const mimeType = file.getMimeType() || 'application/octet-stream';
+    const fileName = file.getName();
+    const previewUrl = `https://drive.google.com/file/d/${file.getId()}/preview`;
+    const webViewLink = file.getUrl();
+    const downloadUrl = `https://drive.google.com/uc?export=download&id=${file.getId()}`;
+    const thumbnailUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w1600`;
+
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch(e) {}
+
+    let dataUrl = null;
+    let base64Str = null;
+    // Optimasi kecepatan: Hanya encode base64 untuk berkas kecil (< 1.5MB) agar hemat waktu & memori Apps Script
+    if (fileSize < 1500000) {
+      try {
+        const blob = file.getBlob();
+        base64Str = Utilities.base64Encode(blob.getBytes());
+        dataUrl = `data:${mimeType};base64,${base64Str}`;
+      } catch(bErr) {
+        console.warn('Base64 encoding skipped for fast preview:', bErr);
+      }
+    }
+
+    const payload = {
+      dataUrl: dataUrl,
       rawBase64: base64Str,
-      fileName: file.getName(),
+      fileName: fileName,
       mimeType: mimeType,
-      fileSize: file.getSize(),
-      downloadUrl: file.getDownloadUrl(),
-      previewUrl: `https://drive.google.com/file/d/${file.getId()}/preview`,
-      webViewLink: file.getUrl()
+      fileSize: fileSize,
+      downloadUrl: downloadUrl,
+      previewUrl: previewUrl,
+      webViewLink: webViewLink,
+      thumbnailUrl: thumbnailUrl
     };
+
+    try {
+      if (!dataUrl || dataUrl.length < 90000) {
+        CacheService.getScriptCache().put(cacheKey, JSON.stringify(payload), 600);
+      }
+    } catch(e) {}
+
+    return payload;
   }
 };
 
@@ -1526,11 +1647,34 @@ const DocumentService = {
 // ============================================================================
 
 function doGet(e) {
-  const template = HtmlService.createTemplateFromFile('Index');
-  return template.evaluate()
-    .setTitle(DMS_CONFIG.APP_NAME)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  // 1. Check if invoked with API query parameter (e.g. GET request fallback or test)
+  if (e && e.parameter && (e.parameter.action || e.parameter.method)) {
+    const action = e.parameter.action || e.parameter.method;
+    let args = [];
+    if (e.parameter.args) {
+      try { args = JSON.parse(e.parameter.args); } catch(pe) { args = [e.parameter.args]; }
+    }
+    return executeApiAction(action, args);
+  }
+
+  // 2. Health check / status ping
+  if (e && e.parameter && (e.parameter.ping || e.parameter.health)) {
+    return ContentService.createTextOutput(JSON.stringify(apiPing()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 3. Standalone Apps Script UI rendering (if Index.html is present in script project)
+  try {
+    const template = HtmlService.createTemplateFromFile('Index');
+    return template.evaluate()
+      .setTitle(DMS_CONFIG.APP_NAME)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } catch (htmlErr) {
+    // If only Code.gs is deployed as Web App API backend for Vercel/GitHub
+    return ContentService.createTextOutput(JSON.stringify(apiPing()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 /**
@@ -1542,31 +1686,129 @@ function doPost(e) {
   try {
     let payload = {};
     if (e && e.postData && e.postData.contents) {
-      payload = JSON.parse(e.postData.contents);
+      try {
+        payload = JSON.parse(e.postData.contents);
+      } catch (parseErr) {
+        payload = e.parameter || {};
+      }
     } else if (e && e.parameter) {
       payload = e.parameter;
     }
-    const action = payload.action;
-    const args = payload.args || [];
-    
-    // Check if function exists in global scope
-    const fn = this[action];
-    if (typeof fn === 'function') {
-      const result = fn.apply(this, args);
-      return ContentService.createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
-    } else {
-      return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_FOUND', 'API Action ' + action + ' is not registered.')))
-        .setMimeType(ContentService.MimeType.JSON);
+
+    const action = payload.action || payload.methodName || payload.method;
+    let args = payload.args || [];
+    if (typeof args === 'string') {
+      try { args = JSON.parse(args); } catch(e) { args = [args]; }
     }
+    if (!Array.isArray(args)) {
+      args = [args];
+    }
+
+    return executeApiAction(action, args);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_DO_POST_EXCEPTION', err.message)))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
 
+function executeApiAction(action, args) {
+  if (!action || action === 'ping' || action === 'apiPing') {
+    return ContentService.createTextOutput(JSON.stringify(apiPing()))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const API_DISPATCH = {
+    apiPing: apiPing,
+    apiGetPortalInitialData: apiGetPortalInitialData,
+    apiLogin: apiLogin,
+    apiLogout: apiLogout,
+    apiValidateSession: apiValidateSession,
+    apiChangePassword: apiChangePassword,
+    apiGetUsers: apiGetUsers,
+    apiCreateUser: apiCreateUser,
+    apiUpdateUser: apiUpdateUser,
+    apiSetUserStatus: apiSetUserStatus,
+    apiResetUserPassword: apiResetUserPassword,
+    apiDeleteUser: apiDeleteUser,
+    apiGetProjects: apiGetProjects,
+    apiGetProjectById: apiGetProjectById,
+    apiCreateProject: apiCreateProject,
+    apiUpdateProject: apiUpdateProject,
+    apiArchiveProject: apiArchiveProject,
+    apiGetProjectExplorerData: apiGetProjectExplorerData,
+    apiUploadDocument: apiUploadDocument,
+    apiGetDocumentsByCategory: apiGetDocumentsByCategory,
+    apiGetDocumentMetadata: apiGetDocumentMetadata,
+    apiOpenDocumentForReading: apiOpenDocumentForReading,
+    apiUpdateDocumentMetadata: apiUpdateDocumentMetadata,
+    apiSearchDocuments: apiSearchDocuments,
+    apiToggleFavorite: apiToggleFavorite,
+    apiGetFavorites: apiGetFavorites,
+    apiGetRecents: apiGetRecents,
+    apiSoftDeleteDocument: apiSoftDeleteDocument,
+    apiRestoreDocument: apiRestoreDocument,
+    apiPurgeDocument: apiPurgeDocument,
+    apiEmptyTrash: apiEmptyTrash,
+    apiGetTrashDocuments: apiGetTrashDocuments,
+    apiGetAuditLogs: apiGetAuditLogs,
+    apiGetSystemConfigs: apiGetSystemConfigs,
+    apiUpdateSystemConfigs: apiUpdateSystemConfigs
+  };
+
+  const fn = API_DISPATCH[action]
+    || (typeof globalThis !== 'undefined' && typeof globalThis[action] === 'function' ? globalThis[action] : null)
+    || (typeof this !== 'undefined' && typeof this[action] === 'function' ? this[action] : null);
+
+  if (typeof fn === 'function') {
+    const result = fn.apply(null, args);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } else {
+    return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_FOUND', 'API Action ' + action + ' is not registered.')))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function apiPing() {
+  return apiResponseSuccess({
+    status: 'ONLINE',
+    app: DMS_CONFIG.APP_NAME,
+    version: DMS_CONFIG.APP_VERSION,
+    targetDrive: DMS_CONFIG.TARGET_DRIVE_ACCOUNT,
+    timestamp: new Date().toISOString()
+  }, 'Koneksi Google Drive API aktif.');
+}
+
 function apiResponseSuccess(data, message) { return { success: true, data: data || null, message: message || 'OK' }; }
 function apiResponseError(errCode, errMessage) { return { success: false, error: { code: errCode || 'ERR_GENERAL', message: errMessage || 'Server error.' } }; }
+
+/**
+ * Fast unified sync method: Mengambil data inti portal dalam 1 batch cepat untuk performa maksimal portal di Vercel
+ */
+function apiGetPortalInitialData(sessionToken) {
+  try {
+    const auth = AuthService.assertAuthenticated(sessionToken);
+    const projects = filterRecords(SHEETS.PROJECTS, p => !p.isArchived && p.status !== PROJECT_STATUSES.ARCHIVED);
+    const docs = filterRecords(SHEETS.DOCUMENTS, d => !isDocDeletedRecord(d));
+    const userFavorites = filterRecords(SHEETS.FAVORITES, f => f.userId === auth.user.userId);
+    const favSet = new Set(userFavorites.map(f => f.documentId));
+    const mappedDocs = docs.map(d => Object.assign({}, d, { isFavorite: favSet.has(d.documentId) }));
+    
+    const recents = filterRecords(SHEETS.RECENTS, r => r.userId === auth.user.userId)
+      .sort((a, b) => new Date(b.lastOpenedAt) - new Date(a.lastOpenedAt))
+      .slice(0, 15);
+    
+    return apiResponseSuccess({
+      projects: projects,
+      documents: mappedDocs,
+      favorites: mappedDocs.filter(d => d.isFavorite),
+      recents: recents,
+      user: auth.user
+    });
+  } catch (err) {
+    return apiResponseError('ERR_PORTAL_SYNC', err.message);
+  }
+}
 
 function apiLogin(credentials) {
   try {
@@ -1794,6 +2036,7 @@ function setupDMS() {
     const existingUsers = readAllRecords(SHEETS.USERS);
     const existingEmails = new Set(existingUsers.map(u => String(u.email).toLowerCase()));
     const initialAdmins = [
+      { email: 'jackslomberger@gmail.com', fullName: 'Jack Slomberger (Super Admin)', pass: 'AdminPassword2026!', userId: 'USR-JACK' },
       { email: 'admin@jasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN-ALIAS' },
       { email: 'admin@asuransijasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN' },
       { email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer', pass: 'tfb2b2c', userId: 'USR-DEFAULT' },

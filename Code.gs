@@ -1237,13 +1237,8 @@ const DocumentService = {
       }
     });
 
-    // Get all active documents strictly matching Document Explorer presence
-    const allDocs = filterRecords(SHEETS.DOCUMENTS, d => {
-      if (isDocDeletedRecord(d)) return false;
-      if (!d.projectId || !activeProjectMap[d.projectId]) return false;
-      if (!d.category || typeof d.category !== 'string' || d.category.trim().length === 0) return false;
-      return true;
-    });
+    // Get all active documents across all projects
+    const allDocs = filterRecords(SHEETS.DOCUMENTS, d => !isDocDeletedRecord(d));
 
     const projectMap = {};
     allProjects.forEach(p => { projectMap[p.projectId] = p; });
@@ -1255,6 +1250,7 @@ const DocumentService = {
     const todayStr = new Date().toISOString().slice(0, 10);
     const in30DaysStr = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const in60DaysStr = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const queryTokens = query ? query.split(/\s+/).filter(Boolean) : [];
 
     let results = allDocs.filter(d => {
       const prj = projectMap[d.projectId];
@@ -1303,19 +1299,32 @@ const DocumentService = {
       if (filter.dateFrom && d.documentDate && d.documentDate < filter.dateFrom) return false;
       if (filter.dateTo && d.documentDate && d.documentDate > filter.dateTo) return false;
 
-      // Free-text query matching: Document Name, File Name, Description, Tags, Category, Project Name/Code, Partner/Mitra
-      if (query) {
-        const nameMatch = (d.documentName || '').toLowerCase().includes(query);
-        const fileNameMatch = (d.fileName || '').toLowerCase().includes(query);
-        const descMatch = (d.description || '').toLowerCase().includes(query);
-        const tagsMatch = (d.tags || '').toLowerCase().includes(query);
-        const catMatch = (d.category || '').toLowerCase().includes(query);
-        const prjCodeMatch = prj && (prj.projectCode || '').toLowerCase().includes(query);
-        const prjNameMatch = (prj && (prj.projectName || '').toLowerCase().includes(query)) || ((d.projectName || '').toLowerCase().includes(query));
-        const partnerMatch = (prj && (prj.partner || '').toLowerCase().includes(query)) || ((d.partner || d.partnerName || '').toLowerCase().includes(query));
-        if (!nameMatch && !fileNameMatch && !descMatch && !tagsMatch && !catMatch && !prjCodeMatch && !prjNameMatch && !partnerMatch) {
-          return false;
-        }
+      // Smart Search: Multi-term token matching across ALL metadata of uploaded documents
+      if (queryTokens.length > 0) {
+        const docMetadataCorpus = [
+          d.documentName || '',
+          d.fileName || '',
+          d.description || '',
+          d.tags || '',
+          d.category || '',
+          d.fileType || '',
+          d.classification || '',
+          d.documentId || '',
+          d.uploadedBy || '',
+          d.documentDate || '',
+          d.effectiveDate || '',
+          d.expiryDate || '',
+          d.driveFileId || '',
+          prj ? (prj.projectCode || '') : '',
+          prj ? (prj.projectName || '') : '',
+          prj ? (prj.partner || '') : '',
+          d.projectName || '',
+          d.projectCode || '',
+          d.partner || d.partnerName || ''
+        ].join(' ').toLowerCase();
+
+        const matchesAll = queryTokens.every(token => docMetadataCorpus.includes(token));
+        if (!matchesAll) return false;
       }
 
       return true;

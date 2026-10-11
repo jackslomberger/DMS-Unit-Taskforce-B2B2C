@@ -4,11 +4,14 @@
  */
 
 export default function App() {
+  const remoteUrl = (import.meta.env.VITE_APPS_SCRIPT_URL || '').trim();
+  const iframeSrc = remoteUrl ? `/Index.html?apiUrl=${encodeURIComponent(remoteUrl)}` : '/Index.html';
+
   return (
     <div style={{ width: '100%', height: '100%', overflow: 'hidden', margin: 0, padding: 0 }}>
       <iframe
         id="dms-portal-iframe"
-        src="/Index.html"
+        src={iframeSrc}
         title="Enterprise Document Management System"
         style={{
           width: '100%',

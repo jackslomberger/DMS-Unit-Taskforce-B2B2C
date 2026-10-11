@@ -106,3 +106,33 @@ Aplikasi telah dilengkapi dengan arsitektur akselerator multi-tier untuk memasti
 4. **Tombol "⚡ Drive Turbo" di Topbar**:
    - Indikator aktif di topbar menampilkan status sinkronisasi dan menyediakan tombol 1-klik untuk memaksa pembaruan data Google Drive jika diperlukan.
 
+---
+
+### 7. Troubleshooting & Solusi Error Pasca Deploy Ulang
+
+Jika setelah deploy ulang atau memperbarui kode terjadi kendala, berikut adalah akar penyebab dan solusi perbaikannya:
+
+1. **Kendala: Error saat Web App memanggil API (`ERR_METHOD_NOT_FOUND` / `ERR_DO_POST_EXCEPTION`)**:
+   - **Penyebab**: Mesin runtime Apps Script V8 tidak mengekspos fungsi global melalui `this[action]` di dalam handler `doPost`.
+   - **Solusi**: Telah diperbaiki dengan `executeApiAction()` dan dictionary `API_DISPATCH` statis di `Code.gs`. Salin versi terbaru `Code.gs` ke editor Apps Script.
+
+2. **Kendala: "Database Error: No active spreadsheet or DMS_SPREADSHEET_ID found"**:
+   - **Penyebab**: Script dibuat sebagai Standalone Script di `script.google.com` sehingga `SpreadsheetApp.getActiveSpreadsheet()` bernilai kosong.
+   - **Solusi**: `Code.gs` versi terbaru otomatis mencari file spreadsheet `DMS_DATABASE_MASTER` di Google Drive Anda, atau otomatis membuatnya secara instan jika belum ada.
+
+3. **Kendala: Gagal terhubung / CORS Preflight / 401 saat Uji Koneksi**:
+   - **Penyebab**: Opsi perizinan deployment Web App salah disetel ke "Only myself" (Hanya saya).
+   - **Solusi**: Pada dialog Deploy Apps Script:
+     - **Execute as**: *Me (jackslomberger@gmail.com)*
+     - **Who has access**: **Anyone** *(Semua orang)*
+
+4. **Kendala: Kode di Apps Script sudah di-paste tetapi perubahan tidak berpengaruh**:
+   - **Penyebab**: Apps Script mengharuskan pembentukan versi baru agar Web App URL menyajikan kode termutakhir.
+   - **Solusi**: Di menu atas Apps Script, klik **Deploy** > **Manage deployments** > klik ikon **Pensil (Edit)** pada Active deployment > Ubah **Version** menjadi **New version** > klik **Deploy**.
+
+5. **Kendala: Otomatisasi URL Endpoint di Vercel**:
+   - Anda dapat memasukkan Web App URL langsung ke Environment Variables Vercel:
+     - Key: `VITE_APPS_SCRIPT_URL`
+     - Value: `https://script.google.com/macros/s/AKfycb.../exec`
+   - Aplikasi akan otomatis terhubung tanpa perlu menginput ulang secara manual di menu Pengaturan.
+
