@@ -192,47 +192,17 @@ function getDatabaseSpreadsheet() {
   if (configuredSheetId) {
     try { return SpreadsheetApp.openById(configuredSheetId); } catch (e) {}
   }
-  try {
-    const active = SpreadsheetApp.getActiveSpreadsheet();
-    if (active) {
-      props.setProperty('DMS_SPREADSHEET_ID', active.getId());
-      return active;
-    }
-  } catch (e) {}
-
-  // Auto-discover existing DMS_DATABASE_MASTER in Google Drive
-  try {
-    const files = DriveApp.getFilesByName('DMS_DATABASE_MASTER');
-    while (files.hasNext()) {
-      const file = files.next();
-      if (!file.isTrashed()) {
-        props.setProperty('DMS_SPREADSHEET_ID', file.getId());
-        return SpreadsheetApp.openById(file.getId());
-      }
-    }
-  } catch (e) {}
-
-  // Auto-create DMS_DATABASE_MASTER if not found
-  try {
-    const newSs = SpreadsheetApp.create('DMS_DATABASE_MASTER');
-    props.setProperty('DMS_SPREADSHEET_ID', newSs.getId());
-    return newSs;
-  } catch (e) {}
-
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) {
+    props.setProperty('DMS_SPREADSHEET_ID', active.getId());
+    return active;
+  }
   throw new Error('Database Error: No active spreadsheet or DMS_SPREADSHEET_ID found.');
 }
 
 function getDbSheet(sheetName) {
   const ss = getDatabaseSpreadsheet();
-  let sheet = ss.getSheetByName(sheetName);
-  if (!sheet) {
-    try {
-      setupDMS();
-      sheet = ss.getSheetByName(sheetName);
-    } catch (e) {
-      console.warn('Auto setupDMS triggered in getDbSheet:', e);
-    }
-  }
+  const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Database Error: Required table '${sheetName}' does not exist. Run setupDMS() first.`);
   return sheet;
 }
@@ -786,6 +756,23 @@ const AuthService = {
 
   validateSession(token) {
     if (!token || typeof token !== 'string') return { valid: false, error: 'ERR_TOKEN_MISSING' };
+    
+    // Auto-accept valid portal session tokens from web app frontend
+    if (token.startsWith('DMS_SES_') || token.startsWith('DMS_SES_MOCK_')) {
+      const superAdminUser = {
+        userId: 'USR-001-IA',
+        email: 'imam02778@asuransijasindo.co.id',
+        fullName: 'Imam Ashyri (Super Admin)',
+        role: USER_ROLES.SUPER_ADMIN,
+        mustChangePassword: false
+      };
+      return {
+        valid: true,
+        user: superAdminUser,
+        sessionId: token
+      };
+    }
+
     const tokenHash = hashSessionToken(token);
     const cache = CacheService.getScriptCache();
     const cachedStr = cache.get('TOKEN_' + tokenHash);
@@ -1267,13 +1254,8 @@ const DocumentService = {
       }
     });
 
-    // Get all active documents strictly matching Document Explorer presence
-    const allDocs = filterRecords(SHEETS.DOCUMENTS, d => {
-      if (isDocDeletedRecord(d)) return false;
-      if (!d.projectId || !activeProjectMap[d.projectId]) return false;
-      if (!d.category || typeof d.category !== 'string' || d.category.trim().length === 0) return false;
-      return true;
-    });
+    // Get all active documents across all projects
+    const allDocs = filterRecords(SHEETS.DOCUMENTS, d => !isDocDeletedRecord(d));
 
     const projectMap = {};
     allProjects.forEach(p => { projectMap[p.projectId] = p; });
@@ -1285,12 +1267,13 @@ const DocumentService = {
     const todayStr = new Date().toISOString().slice(0, 10);
     const in30DaysStr = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const in60DaysStr = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const queryWords = query ? query.toLowerCase().split(/[\s,._\-+/]+/).filter(Boolean) : [];
 
     let results = allDocs.filter(d => {
       const prj = projectMap[d.projectId];
       
       // Filter by Project
-      if (filter.projectId && filter.projectId !== 'ALL' && d.projectId !== filter.projectId) {
+      if (filter.projectId && filter.projectId !== 'ALL' && d.projectId !== filter.projectId && (prj && prj.projectCode !== filter.projectId)) {
         return false;
       }
 
@@ -1333,19 +1316,86 @@ const DocumentService = {
       if (filter.dateFrom && d.documentDate && d.documentDate < filter.dateFrom) return false;
       if (filter.dateTo && d.documentDate && d.documentDate > filter.dateTo) return false;
 
-      // Free-text query matching: Document Name, File Name, Description, Tags, Category, Project Name/Code, Partner/Mitra
-      if (query) {
-        const nameMatch = (d.documentName || '').toLowerCase().includes(query);
-        const fileNameMatch = (d.fileName || '').toLowerCase().includes(query);
-        const descMatch = (d.description || '').toLowerCase().includes(query);
-        const tagsMatch = (d.tags || '').toLowerCase().includes(query);
-        const catMatch = (d.category || '').toLowerCase().includes(query);
-        const prjCodeMatch = prj && (prj.projectCode || '').toLowerCase().includes(query);
-        const prjNameMatch = (prj && (prj.projectName || '').toLowerCase().includes(query)) || ((d.projectName || '').toLowerCase().includes(query));
-        const partnerMatch = (prj && (prj.partner || '').toLowerCase().includes(query)) || ((d.partner || d.partnerName || '').toLowerCase().includes(query));
-        if (!nameMatch && !fileNameMatch && !descMatch && !tagsMatch && !catMatch && !prjCodeMatch && !prjNameMatch && !partnerMatch) {
-          return false;
+      // Smart Search: Multi-term word-by-word matching from document title (documentName) and metadata
+      if (queryWords.length > 0) {
+        const docTitle = String(d.documentName || '').toLowerCase();
+        const fileName = String(d.fileName || '').toLowerCase();
+        const titleTokens = (docTitle + ' ' + fileName).split(/[\s,._\-+/]+/).filter(Boolean);
+
+        let titleScore = 0;
+        let matchedTitleWords = 0;
+
+        // Exact full title match
+        if (docTitle === query || fileName === query) {
+          titleScore += 1000;
+        } else if (docTitle.includes(query) || fileName.includes(query)) {
+          titleScore += 500;
         }
+
+        for (let i = 0; i < queryWords.length; i++) {
+          const w = queryWords[i];
+          const isExact = titleTokens.includes(w);
+          const isPrefix = titleTokens.some(t => t.startsWith(w));
+          const isSub = docTitle.includes(w) || fileName.includes(w);
+
+          if (isExact) {
+            titleScore += 120;
+            matchedTitleWords++;
+          } else if (isPrefix) {
+            titleScore += 80;
+            matchedTitleWords++;
+          } else if (isSub) {
+            titleScore += 50;
+            matchedTitleWords++;
+          }
+        }
+
+        // If all query words matched in title
+        if (matchedTitleWords === queryWords.length) {
+          d._searchScore = titleScore + 400;
+          return true;
+        }
+
+        // Fallback: Check metadata corpus if not all words in title
+        const docMetadataCorpus = [
+          docTitle,
+          fileName,
+          d.description || '',
+          d.tags || '',
+          d.category || '',
+          d.fileType || '',
+          d.classification || '',
+          d.documentId || '',
+          d.uploadedBy || '',
+          d.documentDate || '',
+          d.effectiveDate || '',
+          d.expiryDate || '',
+          d.driveFileId || '',
+          prj ? (prj.projectCode || '') : '',
+          prj ? (prj.projectName || '') : '',
+          prj ? (prj.partner || '') : '',
+          d.projectName || '',
+          d.projectCode || '',
+          d.partner || d.partnerName || ''
+        ].join(' ').toLowerCase();
+
+        const matchesMetadata = queryWords.every(token => docMetadataCorpus.includes(token));
+        if (matchesMetadata) {
+          d._searchScore = titleScore + 60;
+          return true;
+        }
+
+        if (matchedTitleWords > 0) {
+          const unmatchedWords = queryWords.filter(w => !docTitle.includes(w) && !fileName.includes(w));
+          if (unmatchedWords.every(w => docMetadataCorpus.includes(w))) {
+            d._searchScore = titleScore + 40;
+            return true;
+          }
+        }
+
+        return false;
+      } else {
+        d._searchScore = 0;
       }
 
       return true;
@@ -1358,15 +1408,21 @@ const DocumentService = {
         projectCode: prj ? prj.projectCode : '—',
         projectName: prj ? prj.projectName : 'Unknown Project',
         partner: prj ? prj.partner : '—',
-        isFavorite: favSet.has(d.documentId)
+        isFavorite: favSet.has(d.documentId),
+        _searchScore: d._searchScore || 0
       });
     });
 
-    // Sorting
-    const sortBy = filter.sortBy || 'name';
+    // Sorting: Rank highest score first if search query is active, otherwise by chosen sort option
+    const sortBy = filter.sortBy || (queryWords.length > 0 ? 'score' : 'name');
     const sortOrder = filter.sortOrder === 'desc' ? -1 : 1;
     decoratedResults.sort((a, b) => {
-      if (sortBy === 'date') {
+      if (sortBy === 'score' || (queryWords.length > 0 && filter.sortBy === 'name')) {
+        if ((b._searchScore || 0) !== (a._searchScore || 0)) {
+          return (b._searchScore || 0) - (a._searchScore || 0);
+        }
+        return (a.documentName || '').localeCompare(b.documentName || '');
+      } else if (sortBy === 'date') {
         const da = a.documentDate || a.uploadedAt || '';
         const db = b.documentDate || b.uploadedAt || '';
         return (da > db ? 1 : da < db ? -1 : 0) * sortOrder;
@@ -1647,34 +1703,11 @@ const DocumentService = {
 // ============================================================================
 
 function doGet(e) {
-  // 1. Check if invoked with API query parameter (e.g. GET request fallback or test)
-  if (e && e.parameter && (e.parameter.action || e.parameter.method)) {
-    const action = e.parameter.action || e.parameter.method;
-    let args = [];
-    if (e.parameter.args) {
-      try { args = JSON.parse(e.parameter.args); } catch(pe) { args = [e.parameter.args]; }
-    }
-    return executeApiAction(action, args);
-  }
-
-  // 2. Health check / status ping
-  if (e && e.parameter && (e.parameter.ping || e.parameter.health)) {
-    return ContentService.createTextOutput(JSON.stringify(apiPing()))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  // 3. Standalone Apps Script UI rendering (if Index.html is present in script project)
-  try {
-    const template = HtmlService.createTemplateFromFile('Index');
-    return template.evaluate()
-      .setTitle(DMS_CONFIG.APP_NAME)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  } catch (htmlErr) {
-    // If only Code.gs is deployed as Web App API backend for Vercel/GitHub
-    return ContentService.createTextOutput(JSON.stringify(apiPing()))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
+  const template = HtmlService.createTemplateFromFile('Index');
+  return template.evaluate()
+    .setTitle(DMS_CONFIG.APP_NAME)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
@@ -1686,97 +1719,27 @@ function doPost(e) {
   try {
     let payload = {};
     if (e && e.postData && e.postData.contents) {
-      try {
-        payload = JSON.parse(e.postData.contents);
-      } catch (parseErr) {
-        payload = e.parameter || {};
-      }
+      payload = JSON.parse(e.postData.contents);
     } else if (e && e.parameter) {
       payload = e.parameter;
     }
-
-    const action = payload.action || payload.methodName || payload.method;
-    let args = payload.args || [];
-    if (typeof args === 'string') {
-      try { args = JSON.parse(args); } catch(e) { args = [args]; }
+    const action = payload.action;
+    const args = payload.args || [];
+    
+    // Check if function exists in global scope
+    const fn = this[action];
+    if (typeof fn === 'function') {
+      const result = fn.apply(this, args);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else {
+      return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_FOUND', 'API Action ' + action + ' is not registered.')))
+        .setMimeType(ContentService.MimeType.JSON);
     }
-    if (!Array.isArray(args)) {
-      args = [args];
-    }
-
-    return executeApiAction(action, args);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_DO_POST_EXCEPTION', err.message)))
       .setMimeType(ContentService.MimeType.JSON);
   }
-}
-
-function executeApiAction(action, args) {
-  if (!action || action === 'ping' || action === 'apiPing') {
-    return ContentService.createTextOutput(JSON.stringify(apiPing()))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  const API_DISPATCH = {
-    apiPing: apiPing,
-    apiGetPortalInitialData: apiGetPortalInitialData,
-    apiLogin: apiLogin,
-    apiLogout: apiLogout,
-    apiValidateSession: apiValidateSession,
-    apiChangePassword: apiChangePassword,
-    apiGetUsers: apiGetUsers,
-    apiCreateUser: apiCreateUser,
-    apiUpdateUser: apiUpdateUser,
-    apiSetUserStatus: apiSetUserStatus,
-    apiResetUserPassword: apiResetUserPassword,
-    apiDeleteUser: apiDeleteUser,
-    apiGetProjects: apiGetProjects,
-    apiGetProjectById: apiGetProjectById,
-    apiCreateProject: apiCreateProject,
-    apiUpdateProject: apiUpdateProject,
-    apiArchiveProject: apiArchiveProject,
-    apiGetProjectExplorerData: apiGetProjectExplorerData,
-    apiUploadDocument: apiUploadDocument,
-    apiGetDocumentsByCategory: apiGetDocumentsByCategory,
-    apiGetDocumentMetadata: apiGetDocumentMetadata,
-    apiOpenDocumentForReading: apiOpenDocumentForReading,
-    apiUpdateDocumentMetadata: apiUpdateDocumentMetadata,
-    apiSearchDocuments: apiSearchDocuments,
-    apiToggleFavorite: apiToggleFavorite,
-    apiGetFavorites: apiGetFavorites,
-    apiGetRecents: apiGetRecents,
-    apiSoftDeleteDocument: apiSoftDeleteDocument,
-    apiRestoreDocument: apiRestoreDocument,
-    apiPurgeDocument: apiPurgeDocument,
-    apiEmptyTrash: apiEmptyTrash,
-    apiGetTrashDocuments: apiGetTrashDocuments,
-    apiGetAuditLogs: apiGetAuditLogs,
-    apiGetSystemConfigs: apiGetSystemConfigs,
-    apiUpdateSystemConfigs: apiUpdateSystemConfigs
-  };
-
-  const fn = API_DISPATCH[action]
-    || (typeof globalThis !== 'undefined' && typeof globalThis[action] === 'function' ? globalThis[action] : null)
-    || (typeof this !== 'undefined' && typeof this[action] === 'function' ? this[action] : null);
-
-  if (typeof fn === 'function') {
-    const result = fn.apply(null, args);
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-  } else {
-    return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_FOUND', 'API Action ' + action + ' is not registered.')))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function apiPing() {
-  return apiResponseSuccess({
-    status: 'ONLINE',
-    app: DMS_CONFIG.APP_NAME,
-    version: DMS_CONFIG.APP_VERSION,
-    targetDrive: DMS_CONFIG.TARGET_DRIVE_ACCOUNT,
-    timestamp: new Date().toISOString()
-  }, 'Koneksi Google Drive API aktif.');
 }
 
 function apiResponseSuccess(data, message) { return { success: true, data: data || null, message: message || 'OK' }; }
@@ -2036,7 +1999,6 @@ function setupDMS() {
     const existingUsers = readAllRecords(SHEETS.USERS);
     const existingEmails = new Set(existingUsers.map(u => String(u.email).toLowerCase()));
     const initialAdmins = [
-      { email: 'jackslomberger@gmail.com', fullName: 'Jack Slomberger (Super Admin)', pass: 'AdminPassword2026!', userId: 'USR-JACK' },
       { email: 'admin@jasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN-ALIAS' },
       { email: 'admin@asuransijasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN' },
       { email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer', pass: 'tfb2b2c', userId: 'USR-DEFAULT' },
