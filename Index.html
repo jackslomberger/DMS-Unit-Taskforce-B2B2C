@@ -1875,6 +1875,32 @@
 
   <!-- SCRIPT -->
   <script>
+    // ==========================================================================
+    // GLOBAL DEFAULT GOOGLE DRIVE DATABASE ENDPOINT (jackslomberger@gmail.com)
+    // ==========================================================================
+    const DEFAULT_GDRIVE_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbwZn6Gqu516waHP1DmPWwNSUPOT5qQ8WbrmoIVlHMbfvVlyfftRE9lGL9fFCXHV-LXeBA/exec';
+
+    function getGoogleDriveEndpointUrl() {
+      try {
+        const stored = (localStorage.getItem('dms_remote_api_url') || '').trim();
+        if (stored && stored.startsWith('https://script.google.com/macros/s/')) {
+          return stored;
+        }
+      } catch (e) {}
+      return DEFAULT_GDRIVE_ENDPOINT_URL;
+    }
+
+    try {
+      if (!localStorage.getItem('dms_remote_api_url')) {
+        localStorage.setItem('dms_remote_api_url', DEFAULT_GDRIVE_ENDPOINT_URL);
+      }
+      const _initParams = new URLSearchParams(window.location.search);
+      const _initApi = _initParams.get('apiUrl') || _initParams.get('endpoint') || _initParams.get('api');
+      if (_initApi && _initApi.trim().startsWith('https://script.google.com/macros/s/')) {
+        localStorage.setItem('dms_remote_api_url', _initApi.trim());
+      }
+    } catch (e) {}
+
     const AppState = {
       sessionToken: null,
       currentUser: null,
@@ -2252,7 +2278,7 @@
       async prefetchCorePortalData() {
         if (!AppState.sessionToken) return;
         updateTurboIndicator('Syncing...');
-        const remoteUrl = (localStorage.getItem('dms_remote_api_url') || '').trim();
+        const remoteUrl = getGoogleDriveEndpointUrl();
         
         // Prime in-memory collections immediately from ServerApi mock / storage
         if (ServerApi && ServerApi._mockProjects) {
@@ -2275,6 +2301,9 @@
             if (fastBatch.projects && Array.isArray(fastBatch.projects)) {
               AppState.projectsList = fastBatch.projects;
               this.set('apiGetProjects_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.projects);
+              if (AppState.projectsList.length > 0 && !AppState.explorer.activeProjectId) {
+                AppState.explorer.activeProjectId = AppState.projectsList[0].projectId;
+              }
             }
             if (fastBatch.documents && Array.isArray(fastBatch.documents)) {
               this.set('apiSearchDocuments_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.documents);
@@ -2288,6 +2317,18 @@
               this.set('apiGetRecents_' + JSON.stringify([AppState.sessionToken, 15]), (fastBatch.recents || []).slice(0, 15));
             }
             updateTurboIndicator('Synced');
+
+            // Segarkan tampilan aktif secara mulus dengan data Google Drive live
+            const canvas = document.getElementById('view-canvas');
+            if (canvas) {
+              if (AppState.currentRoute === 'DASHBOARD' && typeof renderDashboardView === 'function') {
+                renderDashboardView(canvas);
+              } else if (AppState.currentRoute === 'PROJECTS' && typeof renderProjectsView === 'function') {
+                renderProjectsView(canvas);
+              } else if (AppState.currentRoute === 'EXPLORER' && typeof renderExplorerView === 'function') {
+                renderExplorerView(canvas);
+              }
+            }
             return;
           }
 
@@ -2299,6 +2340,10 @@
             ServerApi.call('apiGetRecents', AppState.sessionToken, 6)
           ]).then(() => {
             updateTurboIndicator('Synced');
+            const canvas = document.getElementById('view-canvas');
+            if (canvas && AppState.currentRoute === 'DASHBOARD') {
+              renderDashboardView(canvas);
+            }
           }).catch(() => {});
         } catch(e) {
           updateTurboIndicator('Ready');
@@ -2648,13 +2693,13 @@
         { key: 'EXPIRY_ALERT_DAYS', value: '30', description: 'Days before expiration to begin warning indicators', category: 'Notifications', updatedAt: '2026-01-01T00:00:00Z' }
       ],
       _mockProjects: [
-        { projectId: 'PRJ-2026-001', projectCode: 'PRJ-2026-001', projectName: 'Kemitraan RS Siloam 2026', partner: 'PT Siloam Medika', status: 'ACTIVE', pic: 'dr. Ratna Sari', isArchived: false },
-        { projectId: 'PRJ-2026-002', projectCode: 'PRJ-2026-002', projectName: 'Pengadaan Lab Terpadu Bidakara', partner: 'PT Bidakara Medika Utama', status: 'ACTIVE', pic: 'Ir. Hendra Kusuma', isArchived: false }
+        { projectId: 'PRJ-0B497C42276B31', projectCode: 'PRJ-2026-001', projectName: 'Kemitraan Asuransi Travel dengan Moda Transportasi', partner: 'PT MRT Jakarta', status: 'ACTIVE', pic: 'M.A Fatwa', driveFolderId: '1mqbh4xZAhh0u8N37Z0yNcFQ0o1FH9QKC', isArchived: false, documentCount: 2, createdAt: '2026-10-09T09:42:53.053Z' },
+        { projectId: 'PRJ-2026-002', projectCode: 'PRJ-2026-002', projectName: 'Pengadaan Lab Terpadu Bidakara', partner: 'PT Bidakara Medika Utama', status: 'ACTIVE', pic: 'Ir. Hendra Kusuma', isArchived: false, documentCount: 1 }
       ],
       _mockRecents: [
+        { documentId: 'DOC-6BD0D6C7078705', lastOpenedAt: new Date(Date.now() - 5 * 60000).toISOString() },
         { documentId: 'DOC-01', lastOpenedAt: new Date(Date.now() - 12 * 60000).toISOString() },
-        { documentId: 'DOC-04', lastOpenedAt: new Date(Date.now() - 95 * 60000).toISOString() },
-        { documentId: 'DOC-06', lastOpenedAt: new Date(Date.now() - 1440 * 60000).toISOString() }
+        { documentId: 'DOC-04', lastOpenedAt: new Date(Date.now() - 95 * 60000).toISOString() }
       ],
       _mockAuditLogs: [
         {
@@ -2666,31 +2711,40 @@
         {
           activityId: 'LOG-002', timestamp: new Date(Date.now() - 15 * 60000).toISOString(),
           userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'VIEW_DOCUMENT', projectId: 'PRJ-2026-001', documentId: 'DOC-01', targetType: 'DOCUMENT', targetName: 'PKS Siloam Medika 2026.pdf',
-          details: 'Inspected in Document Reader', status: 'SUCCESS'
+          action: 'VIEW_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-6BD0D6C7078705', targetType: 'DOCUMENT', targetName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
+          details: 'Inspected in Document Reader (Google Drive)', status: 'SUCCESS'
         },
         {
           activityId: 'LOG-003', timestamp: new Date(Date.now() - 120 * 60000).toISOString(),
           userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'SOFT_DELETE_DOCUMENT', projectId: 'PRJ-2026-001', documentId: 'DOC-09', targetType: 'DOCUMENT', targetName: 'Draft MoU Fasilitas Parkir Khusus RS.docx',
+          action: 'SOFT_DELETE_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-09', targetType: 'DOCUMENT', targetName: 'Draft MoU Fasilitas Parkir Khusus RS.docx',
           details: 'Moved to Trash Repository', status: 'SUCCESS'
         },
         {
           activityId: 'LOG-004', timestamp: new Date(Date.now() - 24 * 3600000).toISOString(),
           userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'UPLOAD_DOCUMENT', projectId: 'PRJ-2026-002', documentId: 'DOC-07', targetType: 'DOCUMENT', targetName: 'Surat Rekomendasi Dinkes Laboratorium.pdf',
-          details: 'Uploaded into 09_SURAT folder', status: 'SUCCESS'
+          action: 'UPLOAD_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-6BD0D6C7078705', targetType: 'DOCUMENT', targetName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
+          details: 'Uploaded into 04_BAK folder in Google Drive (jackslomberger@gmail.com)', status: 'SUCCESS'
         },
         {
           activityId: 'LOG-005', timestamp: new Date(Date.now() - 48 * 3600000).toISOString(),
           userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'CREATE_PROJECT', projectId: 'PRJ-2026-002', targetType: 'PROJECT', targetName: 'PRJ-2026-002',
-          details: 'Initialized 14 standard category folders in Google Drive', status: 'SUCCESS'
+          action: 'CREATE_PROJECT', projectId: 'PRJ-0B497C42276B31', targetType: 'PROJECT', targetName: 'PRJ-2026-001',
+          details: 'Initialized 14 standard category folders in Google Drive jackslomberger@gmail.com', status: 'SUCCESS'
         }
       ],
       _mockDocuments: [
         {
-          documentId: 'DOC-01', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_01', documentName: 'PKS Siloam Medika 2026.pdf',
+          documentId: 'DOC-6BD0D6C7078705', projectId: 'PRJ-0B497C42276B31', driveFileId: '1k06OI6n0OhvzZNyH47HNzlRc4lBk8_Kb',
+          documentName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off',
+          fileName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
+          category: '04_BAK', description: 'Berita Acara Kesepakatan Sponsorship & Partnership MRT Jakarta x Asuransi Jasindo.',
+          documentDate: '2025-10-31', effectiveDate: '2025-11-04', expiryDate: '2028-10-31', status: 'ACTIVE', classification: 'INTERNAL',
+          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 641740, tags: 'bak, sponsorship, mrt, mrtj, jasindo',
+          uploadedBy: 'USR-001-IA', uploadedByName: 'Imam Ahmad', uploadedAt: '2026-10-09T09:50:00Z', isFavorite: true
+        },
+        {
+          documentId: 'DOC-01', projectId: 'PRJ-0B497C42276B31', driveFileId: 'mock_drive_file_01', documentName: 'PKS MRT Jakarta Travel Coverage 2026.pdf',
           category: '01_PKS', description: 'Perjanjian kerjasama induk operasional fasilitas medis dan rujukan 2026.', documentDate: '2026-01-15',
           effectiveDate: '2026-02-01', expiryDate: '2027-01-31', status: 'ACTIVE', classification: 'INTERNAL',
           fileType: 'PDF', mimeType: 'application/pdf', fileSize: 2491024, tags: 'pks, operasional, siloam',
@@ -2803,7 +2857,7 @@
         if (READ_CACHE_METHODS.includes(methodName)) {
           const cachedResult = DmsFastCache.get(cacheKey);
           if (cachedResult !== null) {
-            const remoteUrl = (localStorage.getItem('dms_remote_api_url') || '').trim();
+            const remoteUrl = getGoogleDriveEndpointUrl();
             if (remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
               DmsFastCache.revalidateInBackground(methodName, args, cacheKey, remoteUrl);
             }
@@ -2829,7 +2883,7 @@
           }
 
           // 2. Lingkungan Vercel / GitHub yang terhubung ke Apps Script Web App Endpoint
-          const remoteUrl = (localStorage.getItem('dms_remote_api_url') || '').trim();
+          const remoteUrl = getGoogleDriveEndpointUrl();
 
           // INSTANT ZERO-LATENCY SIGN TO PORTAL (< 10ms)
           if (methodName === 'apiLogin') {
@@ -3574,6 +3628,32 @@
 
     /* INITIALIZATION */
     document.addEventListener('DOMContentLoaded', () => {
+      // Automatic Google Drive Web App endpoint synchronization for all users:
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const passedApiUrl = (urlParams.get('apiUrl') || urlParams.get('endpoint') || urlParams.get('api') || '').trim();
+        if (passedApiUrl && passedApiUrl.startsWith('https://script.google.com/macros/s/')) {
+          localStorage.setItem('dms_remote_api_url', passedApiUrl);
+        }
+      } catch (e) {}
+
+      try {
+        if (window.parent && window.parent !== window && window.parent.location) {
+          const parentParams = new URLSearchParams(window.parent.location.search);
+          const parentApiUrl = (parentParams.get('apiUrl') || parentParams.get('endpoint') || parentParams.get('api') || '').trim();
+          if (parentApiUrl && parentApiUrl.startsWith('https://script.google.com/macros/s/')) {
+            localStorage.setItem('dms_remote_api_url', parentApiUrl);
+          }
+        }
+      } catch (e) {}
+
+      // Request configuration from parent window if embedded
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'DMS_REQUEST_CONFIG' }, '*');
+        }
+      } catch (e) {}
+
       ServerApi._loadMockUsers();
       ServerApi._loadMockProjects();
       ServerApi._loadMockDocuments();
@@ -3664,8 +3744,15 @@
       if (event.data && event.data.type === 'DMS_REQUEST_AUTH_STATE') {
         notifyParentAuthState(AppState.currentUser);
       } else if (event.data && event.data.type === 'DMS_CONFIG_INIT') {
-        if (event.data.appsScriptUrl && !localStorage.getItem('dms_remote_api_url')) {
-          localStorage.setItem('dms_remote_api_url', event.data.appsScriptUrl.trim());
+        if (event.data.appsScriptUrl) {
+          const newUrl = event.data.appsScriptUrl.trim();
+          if (newUrl.startsWith('https://script.google.com/macros/s/')) {
+            const oldUrl = localStorage.getItem('dms_remote_api_url');
+            localStorage.setItem('dms_remote_api_url', newUrl);
+            if (oldUrl !== newUrl && AppState.sessionToken) {
+              DmsFastCache.prefetchCorePortalData();
+            }
+          }
         }
       }
     });
@@ -5685,7 +5772,7 @@ ${440 + streamLen}
       updateUploadSubmitButtonLabel();
 
       const subTitle = document.getElementById('upload-modal-subtitle');
-      const isDriveLive = Boolean((localStorage.getItem('dms_remote_api_url') || '').trim() || (typeof google !== 'undefined' && google.script && google.script.run));
+      const isDriveLive = Boolean(getGoogleDriveEndpointUrl() || (typeof google !== 'undefined' && google.script && google.script.run));
       if (subTitle) {
         if (isDriveLive) {
           subTitle.innerHTML = '🟢 Terhubung ke Google Drive: <strong>jackslomberger@gmail.com</strong> (Folder: DMS_ROOT_REPOSITORY)';
@@ -5985,7 +6072,7 @@ ${440 + streamLen}
 
         closeUploadModal();
 
-        const isDriveLive = Boolean((localStorage.getItem('dms_remote_api_url') || '').trim() || (typeof google !== 'undefined' && google.script && google.script.run));
+        const isDriveLive = Boolean(getGoogleDriveEndpointUrl() || (typeof google !== 'undefined' && google.script && google.script.run));
         if (isDriveLive) {
           if (isCreatingNewProject) {
             showToast(`Project "${targetProjectName}" & berkas fisik berhasil tersimpan langsung ke Google Drive jackslomberger@gmail.com!`, 'success');
@@ -8292,6 +8379,12 @@ ${440 + streamLen}
         return;
       }
 
+      // Pastikan config default selalu tersedia di memori untuk instan 0ms render
+      if (!AppState.settings.configs || AppState.settings.configs.length === 0) {
+        ServerApi._loadMockConfigs();
+        AppState.settings.configs = ServerApi._mockConfigs || [];
+      }
+
       canvas.innerHTML = `
         <div class="view-content-wrapper">
           <!-- TOPBAR HEADER -->
@@ -8306,13 +8399,13 @@ ${440 + streamLen}
               </p>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
-              <button class="btn-secondary" onclick="resetSettingsToDefaults()" title="Reset to Factory Defaults">
+              <button type="button" class="btn-secondary" onclick="resetSettingsToDefaults()" title="Reset to Factory Defaults">
                 <span>↺ Defaults</span>
               </button>
-              <button class="btn-secondary" onclick="loadSystemConfigs()" title="Reload from Server">
+              <button type="button" class="btn-secondary" id="btn-reload-settings" onclick="loadSystemConfigs(true)" title="Reload from Server">
                 <span>🔄 Reload</span>
               </button>
-              <button class="btn-accent" id="btn-save-settings" onclick="handleSaveAllSettings()">
+              <button type="button" class="btn-accent" id="btn-save-settings" onclick="handleSaveAllSettings()">
                 <span>💾 Save Changes</span>
               </button>
             </div>
@@ -8324,29 +8417,48 @@ ${440 + streamLen}
           </div>
 
           <!-- SETTINGS CARDS CONTAINER -->
-          <div id="settings-cards-container">
-            <div style="text-align: center; padding: 3rem;"><div class="spinner" style="border-top-color: var(--navy-600);"></div></div>
-          </div>
+          <div id="settings-cards-container"></div>
         </div>
       `;
 
-      AppState.settings.modifiedMap = {};
-      loadSystemConfigs();
+      // INSTANT RENDER (0ms): Langsung render formulir pengaturan tanpa jeda spinner
+      renderSettingsSections(AppState.settings.configs);
+
+      // Background silent revalidation dari Google Apps Script jika terhubung
+      loadSystemConfigs(false);
     }
 
-    async function loadSystemConfigs() {
+    async function loadSystemConfigs(isManualReload = false) {
       const container = document.getElementById('settings-cards-container');
       if (!container) return;
-      container.innerHTML = `<div style="text-align: center; padding: 3rem;"><div class="spinner" style="border-top-color: var(--navy-600);"></div></div>`;
+
+      const reloadBtn = document.getElementById('btn-reload-settings');
+      if (isManualReload && reloadBtn) {
+        reloadBtn.disabled = true;
+        reloadBtn.innerHTML = '<span>⏳ Memuat...</span>';
+      }
 
       try {
         const configs = await ServerApi.call('apiGetSystemConfigs', AppState.sessionToken);
-        AppState.settings.configs = configs || [];
-        AppState.settings.modifiedMap = {};
-        updateUnsavedBanner();
-        renderSettingsSections(AppState.settings.configs);
+        if (configs && Array.isArray(configs) && configs.length > 0) {
+          AppState.settings.configs = configs;
+          // Hanya re-render jika user tidak sedang mengedit form saat ini
+          if (Object.keys(AppState.settings.modifiedMap || {}).length === 0) {
+            renderSettingsSections(AppState.settings.configs);
+          }
+        }
+        if (isManualReload) {
+          showToast('Konfigurasi sistem berhasil diperbarui.', 'success');
+        }
       } catch (err) {
-        container.innerHTML = `<div class="toast error" style="margin: 2rem auto; position: static; max-width: 400px;">Failed to load configurations: ${escapeHtml(err.message)}</div>`;
+        if (isManualReload) {
+          showToast('Gagal memuat konfigurasi dari server: ' + err.message, 'error');
+        }
+      } finally {
+        if (isManualReload && reloadBtn) {
+          reloadBtn.disabled = false;
+          reloadBtn.innerHTML = '<span>🔄 Reload</span>';
+        }
       }
     }
 
@@ -8504,10 +8616,7 @@ ${440 + streamLen}
               <span>☁️</span>
               <span>Koneksi Database &amp; Penyimpanan Google Drive</span>
             </div>
-            ${(localStorage.getItem('dms_remote_api_url') || '').trim()
-              ? `<span class="status-pill active" id="gdrive-connection-status-pill" style="background-color: #ECFDF5; color: #059669; border-color: #A7F3D0;">🟢 Terhubung ke Google Drive</span>`
-              : `<span class="status-pill" id="gdrive-connection-status-pill" style="background-color: #FFFBEB; color: #D97706; border-color: #FDE68A;">⚠️ Belum Terhubung (Lokal)</span>`
-            }
+            <span class="status-pill active" id="gdrive-connection-status-pill" style="background-color: #ECFDF5; color: #059669; border-color: #A7F3D0;">🟢 Terhubung ke Google Drive (jackslomberger@gmail.com)</span>
           </div>
 
           <!-- SUB-CARD A: GOOGLE DRIVE DATABASE ENDPOINT CONNECTOR -->
@@ -8517,7 +8626,7 @@ ${440 + streamLen}
                 <span style="font-size: 18px;">📁</span>
                 <div>
                   <strong style="font-size: 13px; color: var(--navy-900); display: block;">Target Penyimpanan Google Drive: <span style="color: #004F8C;">jackslomberger@gmail.com</span></strong>
-                  <span style="font-size: 11px; color: var(--slate-500);">Folder Root: <strong>DMS_ROOT_REPOSITORY</strong> &bull; Database Spreadsheet Terintegrasi</span>
+                  <span style="font-size: 11px; color: var(--slate-500);">Folder Root: <strong>DMS_ROOT_REPOSITORY</strong> &bull; Database Spreadsheet Terintegrasi (Online)</span>
                 </div>
               </div>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
@@ -8531,30 +8640,31 @@ ${440 + streamLen}
             </div>
 
             <p style="font-size: 11.5px; color: var(--slate-600); margin-bottom: 0.85rem; line-height: 1.5;">
-              Hubungkan URL Endpoint Google Drive di bawah ini agar setiap upload dokumen dan pembuatan project di Vercel langsung tersimpan secara fisik ke Google Drive akun Anda dan otomatis tercatat di database spreadsheet.
+              Web Apps ini telah terkonfigurasi secara default langsung terhubung ke Google Drive <strong>jackslomberger@gmail.com</strong>. Setiap pengguna yang membuka tautan hosting dari Vercel langsung dapat melihat database dokumen dan berkas fisik secara real-time.
             </p>
 
             <div style="margin-bottom: 0.85rem; background: #FFFFFF; border: 1px solid var(--slate-200); border-radius: 6px; padding: 0.85rem;">
               <label style="font-size: 11px; font-weight: 700; color: var(--slate-700); display: block; margin-bottom: 4px;">Google Drive Database Endpoint URL (Web App /exec):</label>
               <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
-                <input type="url" id="setting-gdrive-remote-url" class="input-field" placeholder="https://script.google.com/macros/s/AKfycb.../exec" value="${escapeHtml(localStorage.getItem('dms_remote_api_url') || '')}" style="flex: 1; min-width: 260px; height: 34px; font-family: monospace; font-size: 11px; padding: 0 10px;">
+                <input type="url" id="setting-gdrive-remote-url" class="input-field" placeholder="https://script.google.com/macros/s/AKfycb.../exec" value="${escapeHtml(getGoogleDriveEndpointUrl())}" style="flex: 1; min-width: 260px; height: 34px; font-family: monospace; font-size: 11px; padding: 0 10px;">
                 <button type="button" class="btn-primary" onclick="saveGoogleDriveEndpoint()" style="height: 34px; padding: 0 14px; font-size: 11.5px; font-weight: 600;">
                   <span>💾 Simpan &amp; Aktifkan</span>
+                </button>
+                <button type="button" class="btn-secondary" onclick="resetGoogleDriveEndpointToDefault()" style="height: 34px; padding: 0 12px; font-size: 11.5px; font-weight: 600; color: #004F8C; background: #F0F9FF; border-color: #BAE6FD;" title="Kembalikan ke endpoint default jackslomberger@gmail.com">
+                  <span>↺ Default</span>
                 </button>
                 <button type="button" class="btn-secondary" id="btn-test-gdrive-conn" onclick="testGoogleDriveConnection()" style="height: 34px; padding: 0 12px; font-size: 11.5px; font-weight: 600; background: #F1F5F9;">
                   <span>⚡ Uji Koneksi</span>
                 </button>
-                ${(localStorage.getItem('dms_remote_api_url') || '').trim() ? `
-                  <button type="button" class="btn-secondary" onclick="disconnectGoogleDriveEndpoint()" style="height: 34px; padding: 0 10px; font-size: 11px; color: #DC2626; border-color: #FECACA;" title="Putuskan koneksi Google Drive">
-                    <span>✕ Putuskan</span>
-                  </button>
-                ` : ''}
+                <button type="button" class="btn-secondary" onclick="copyShareableDriveLink()" style="height: 34px; padding: 0 12px; font-size: 11.5px; font-weight: 600; color: #0284C7; border-color: #BAE6FD; background: #F0F9FF;" title="Salin link portal lengkap dengan koneksi Google Drive untuk pengguna lain">
+                  <span>🔗 Salin Link Berbagi (Multi-User)</span>
+                </button>
+                <button type="button" class="btn-secondary" onclick="disconnectGoogleDriveEndpoint()" style="height: 34px; padding: 0 10px; font-size: 11px; color: #DC2626; border-color: #FECACA;" title="Putuskan koneksi Google Drive">
+                  <span>✕ Putuskan</span>
+                </button>
               </div>
               <div style="font-size: 10.5px; line-height: 1.4;">
-                ${(localStorage.getItem('dms_remote_api_url') || '').trim()
-                  ? `<span style="color: #059669; font-weight: 600;">✓ Endpoint Aktif &amp; Terhubung:</span> <span style="color: var(--slate-600);">Setiap upload berkas dan data project langsung diteruskan ke Google Drive <strong>jackslomberger@gmail.com</strong>.</span>`
-                  : `<span style="color: #D97706; font-weight: 600;">⚠️ Belum Terhubung:</span> <span style="color: var(--slate-600);">Dokumen yang diunggah saat ini masih tersimpan di memori browser lokal. Tempel URL Web App Google Drive Anda di atas untuk menghubungkan.</span>`
-                }
+                <span style="color: #059669; font-weight: 600;">✓ Endpoint Default Aktif &amp; Terhubung:</span> <span style="color: var(--slate-600);">Setiap pembacaan dan upload dokumen otomatis tersambung ke Google Drive <strong>jackslomberger@gmail.com</strong>.</span>
               </div>
             </div>
 
@@ -8750,12 +8860,9 @@ ${440 + streamLen}
     function saveGoogleDriveEndpoint() {
       const input = document.getElementById('setting-gdrive-remote-url');
       if (!input) return;
-      const url = input.value.trim();
+      let url = input.value.trim();
       if (!url) {
-        localStorage.removeItem('dms_remote_api_url');
-        showToast('Endpoint Google Drive dikosongkan. Aplikasi beralih ke penyimpanan lokal sementara.', 'info');
-        loadSystemConfigs();
-        return;
+        url = DEFAULT_GDRIVE_ENDPOINT_URL;
       }
       if (!url.startsWith('https://script.google.com/macros/s/')) {
         showToast('Format URL salah! URL harus diawali dengan "https://script.google.com/macros/s/" dan berakhiran "/exec".', 'error');
@@ -8763,27 +8870,62 @@ ${440 + streamLen}
       }
       localStorage.setItem('dms_remote_api_url', url);
       showToast('Koneksi Google Drive berhasil disimpan & diaktifkan! Seluruh dokumen & database kini langsung terhubung ke Google Drive jackslomberger@gmail.com.', 'success');
-      loadSystemConfigs();
+      renderSettingsSections(AppState.settings.configs);
+      DmsFastCache.prefetchCorePortalData();
+    }
+
+    function resetGoogleDriveEndpointToDefault() {
+      localStorage.setItem('dms_remote_api_url', DEFAULT_GDRIVE_ENDPOINT_URL);
+      const input = document.getElementById('setting-gdrive-remote-url');
+      if (input) input.value = DEFAULT_GDRIVE_ENDPOINT_URL;
+      showToast('Endpoint Google Drive dikembalikan ke default: jackslomberger@gmail.com.', 'success');
+      renderSettingsSections(AppState.settings.configs);
+      DmsFastCache.prefetchCorePortalData();
     }
 
     function disconnectGoogleDriveEndpoint() {
       showConfirmModal({
-        title: 'Putuskan Koneksi Google Drive',
+        title: 'Putuskan atau Kembalikan Endpoint Google Drive',
         icon: '⚠️',
-        message: 'Apakah Anda yakin ingin memutuskan koneksi Google Drive? Setelah diputuskan, dokumen baru akan disimpan di memori browser lokal sementara.',
-        confirmText: 'Putuskan Koneksi',
-        isDanger: true,
+        message: 'Pilih apakah Anda ingin memutuskan koneksi Google Drive atau mengembalikan ke Endpoint Default (jackslomberger@gmail.com).',
+        confirmText: 'Kembalikan ke Default',
+        isDanger: false,
         onConfirm: () => {
-          localStorage.removeItem('dms_remote_api_url');
-          showToast('Koneksi Google Drive berhasil diputuskan.', 'info');
-          loadSystemConfigs();
+          localStorage.setItem('dms_remote_api_url', DEFAULT_GDRIVE_ENDPOINT_URL);
+          showToast('Koneksi dikembalikan ke Endpoint Default Google Drive jackslomberger@gmail.com.', 'success');
+          renderSettingsSections(AppState.settings.configs);
+          DmsFastCache.prefetchCorePortalData();
         }
       });
     }
 
+    function copyShareableDriveLink() {
+      const endpoint = getGoogleDriveEndpointUrl();
+      if (!endpoint) {
+        showToast('Simpan dan aktifkan Endpoint Google Drive terlebih dahulu.', 'warning');
+        return;
+      }
+      let base = window.location.origin + window.location.pathname;
+      try {
+        if (window.parent && window.parent !== window && window.parent.location.origin) {
+          base = window.parent.location.origin + window.parent.location.pathname;
+        }
+      } catch (e) {}
+      const shareUrl = `${base}?apiUrl=${encodeURIComponent(endpoint)}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(shareUrl).then(() => {
+          showToast('🔗 Link Berbagi berhasil disalin ke clipboard! Siapapun yang membuka link ini akan langsung terhubung ke Google Drive jackslomberger@gmail.com.', 'success');
+        }).catch(() => {
+          prompt('Salin Link Berbagi untuk Pengguna Lain:', shareUrl);
+        });
+      } else {
+        prompt('Salin Link Berbagi untuk Pengguna Lain:', shareUrl);
+      }
+    }
+
     async function testGoogleDriveConnection() {
       const input = document.getElementById('setting-gdrive-remote-url');
-      const url = (input ? input.value.trim() : '') || (localStorage.getItem('dms_remote_api_url') || '').trim();
+      const url = (input ? input.value.trim() : '') || getGoogleDriveEndpointUrl();
       if (!url) {
         showToast('Silakan masukkan Web App URL Google Drive terlebih dahulu.', 'error');
         return;
@@ -8810,7 +8952,8 @@ ${440 + streamLen}
         if (resp.ok) {
           localStorage.setItem('dms_remote_api_url', url);
           showToast('✅ Berhasil Terhubung! Endpoint Google Drive aktif dan siap menyimpan file fisik & database spreadsheet jackslomberger@gmail.com.', 'success');
-          loadSystemConfigs();
+          renderSettingsSections(AppState.settings.configs);
+          DmsFastCache.prefetchCorePortalData();
         } else {
           throw new Error(`Server Google merespon dengan status ${resp.status}`);
         }

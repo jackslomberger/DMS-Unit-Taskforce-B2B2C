@@ -1,0 +1,7 @@
+{
+  "targetDriveEmail": "jackslomberger@gmail.com",
+  "rootFolder": "DMS_ROOT_REPOSITORY",
+  "databaseSpreadsheet": "DMS_DATABASE_MASTER",
+  "appsScriptUrl": "https://script.google.com/macros/s/AKfycbwZn6Gqu516waHP1DmPWwNSUPOT5qQ8WbrmoIVlHMbfvVlyfftRE9lGL9fFCXHV-LXeBA/exec",
+  "description": "Konfigurasi Global Enterprise DMS Google Drive untuk seluruh pengguna Vercel (100% Gratis)"
+}
