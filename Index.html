@@ -1688,6 +1688,17 @@
             </div>
           </div>
 
+          <div id="user-form-existing-password-box" style="display: none; background: #F8FAFC; border: 1px solid var(--slate-200); border-radius: 6px; padding: 10px 12px; margin-bottom: 0.875rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--navy-900);">Password / Access Key Saat Ini (Existing):</span>
+              <div style="display: flex; gap: 4px;">
+                <button type="button" class="btn-secondary" style="height: 22px; font-size: 10px; padding: 0 8px;" onclick="copyExistingPasswordFromModal()">📋 Salin</button>
+                <button type="button" class="btn-secondary" style="height: 22px; font-size: 10px; padding: 0 8px;" onclick="toggleExistingPasswordModalView()" id="btn-toggle-modal-pass">👁️ Lihat</button>
+              </div>
+            </div>
+            <div style="font-family: monospace; font-size: 12px; font-weight: 700; color: #004F8C; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 4px; padding: 4px 8px; word-break: break-all;" id="user-form-existing-password-display">••••••••</div>
+          </div>
+
           <div id="user-form-password-section" style="margin-bottom: 0.875rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
               <label style="font-size: 11px; font-weight: 600; color: var(--slate-700);" id="user-form-password-label">Access Key / Password</label>
@@ -1708,7 +1719,7 @@
 
   <!-- RESET PASSWORD MODAL -->
   <div class="modal-overlay" id="reset-password-modal" style="display: none; z-index: 105;">
-    <div class="modal-card" style="max-width: 420px;">
+    <div class="modal-card" style="max-width: 440px;">
       <div class="modal-header">
         <div>
           <h3 class="modal-title">Reset Access Key / Password</h3>
@@ -1720,9 +1731,17 @@
       <form id="reset-password-form" onsubmit="handleResetPasswordSubmit(event)">
         <input type="hidden" id="reset-user-id">
         <div style="padding: 1.25rem;">
+          <div id="reset-modal-existing-password-box" style="background: #F8FAFC; border: 1px solid var(--slate-200); border-radius: 6px; padding: 10px 12px; margin-bottom: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--navy-900);">Password Saat Ini (Existing):</span>
+              <button type="button" class="btn-secondary" style="height: 22px; font-size: 10px; padding: 0 8px;" onclick="copyResetExistingPasswordFromModal()">📋 Salin</button>
+            </div>
+            <div style="font-family: monospace; font-size: 12px; font-weight: 700; color: #004F8C; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 4px; padding: 4px 8px; word-break: break-all;" id="reset-modal-existing-password-display">••••••••</div>
+          </div>
+
           <div style="margin-bottom: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
-              <label style="font-size: 11px; font-weight: 600; color: var(--slate-700);">New Access Key / Password *</label>
+              <label style="font-size: 11px; font-weight: 600; color: var(--slate-700);">Access Key / Password Baru *</label>
               <button type="button" class="btn-secondary" style="height: 22px; font-size: 10px; padding: 0 6px;" onclick="generateRandomPassword('reset-new-password')">🎲 Generate</button>
             </div>
             <input type="text" id="reset-new-password" class="input-field" placeholder="Masukkan Access Key baru" required>
@@ -1735,6 +1754,40 @@
           </div>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- PASSWORD UPDATE SUCCESS DIALOG -->
+  <div class="modal-overlay" id="password-update-success-modal" style="display: none; z-index: 110;">
+    <div class="modal-card" style="max-width: 460px; border-top: 4px solid #059669;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🔑</span>
+          <div>
+            <h3 class="modal-title" style="color: #065F46;">Password Berhasil Diperbarui</h3>
+            <p style="font-size: 12px; color: var(--slate-500);" id="pass-success-user-email">User Account Credentials</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closePasswordSuccessModal()">&times;</button>
+      </div>
+      <div style="padding: 1.25rem;">
+        <p style="font-size: 12px; color: var(--slate-700); margin-bottom: 0.75rem; line-height: 1.5;">
+          Access Key / Password baru telah berhasil disimpan dan langsung aktif untuk validasi login pada portal DMS:
+        </p>
+        <div style="background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 8px; padding: 12px 14px; margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; font-weight: 700; color: #065F46;">Password Baru (Aktif):</span>
+            <span style="font-size: 10px; background: #059669; color: #FFFFFF; font-weight: 700; padding: 2px 6px; border-radius: 10px;">BERHASIL DIPERBARUI</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" id="pass-success-new-password" readonly class="input-field" style="font-family: monospace; font-size: 13px; font-weight: 700; color: #065F46; background: #FFFFFF; cursor: pointer; flex: 1; height: 36px;" onclick="this.select()">
+            <button type="button" class="btn-accent" style="height: 36px; padding: 0 14px; font-size: 12px;" onclick="copyPasswordFromSuccessModal()">📋 Salin Password</button>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+          <button type="button" class="btn-primary" onclick="closePasswordSuccessModal()">Saya Mengerti &amp; Tutup</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2300,12 +2353,16 @@
           if (fastBatch && (fastBatch.projects || fastBatch.documents)) {
             if (fastBatch.projects && Array.isArray(fastBatch.projects)) {
               AppState.projectsList = fastBatch.projects;
+              ServerApi._mockProjects = fastBatch.projects;
+              ServerApi._saveMockProjects();
               this.set('apiGetProjects_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.projects);
               if (AppState.projectsList.length > 0 && !AppState.explorer.activeProjectId) {
                 AppState.explorer.activeProjectId = AppState.projectsList[0].projectId;
               }
             }
             if (fastBatch.documents && Array.isArray(fastBatch.documents)) {
+              ServerApi._mockDocuments = fastBatch.documents;
+              ServerApi._saveMockDocuments();
               this.set('apiSearchDocuments_' + JSON.stringify([AppState.sessionToken, {}]), fastBatch.documents);
               this.indexDocuments('apiGetPortalInitialData', fastBatch.documents);
             }
@@ -2319,7 +2376,7 @@
             updateTurboIndicator('Synced');
 
             // Segarkan tampilan aktif secara mulus dengan data Google Drive live
-            const canvas = document.getElementById('view-canvas');
+            const canvas = document.getElementById('workspace-canvas') || document.getElementById('view-canvas');
             if (canvas) {
               if (AppState.currentRoute === 'DASHBOARD' && typeof renderDashboardView === 'function') {
                 renderDashboardView(canvas);
@@ -2338,10 +2395,17 @@
             ServerApi.call('apiSearchDocuments', AppState.sessionToken, {}),
             ServerApi.call('apiGetFavorites', AppState.sessionToken),
             ServerApi.call('apiGetRecents', AppState.sessionToken, 6)
-          ]).then(() => {
+          ]).then(([prjs, docs]) => {
+            if (prjs && Array.isArray(prjs)) {
+              ServerApi._mockProjects = prjs;
+              AppState.projectsList = prjs;
+            }
+            if (docs && Array.isArray(docs)) {
+              ServerApi._mockDocuments = docs;
+            }
             updateTurboIndicator('Synced');
-            const canvas = document.getElementById('view-canvas');
-            if (canvas && AppState.currentRoute === 'DASHBOARD') {
+            const canvas = document.getElementById('workspace-canvas') || document.getElementById('view-canvas');
+            if (canvas && AppState.currentRoute === 'DASHBOARD' && typeof renderDashboardView === 'function') {
               renderDashboardView(canvas);
             }
           }).catch(() => {});
@@ -2572,7 +2636,10 @@
           const raw = localStorage.getItem('dms_mock_projects');
           if (raw) {
             const list = JSON.parse(raw);
-            if (Array.isArray(list) && list.length > 0) {
+            const hasLegacyDummy = Array.isArray(list) && list.some(p => p.projectId === 'PRJ-2026-002' || (p.projectName && p.projectName.includes('Bidakara')));
+            if (hasLegacyDummy) {
+              localStorage.removeItem('dms_mock_projects');
+            } else if (Array.isArray(list) && list.length > 0) {
               this._mockProjects = list;
               return this._mockProjects;
             }
@@ -2588,12 +2655,15 @@
       },
       _loadMockDocuments() {
         try {
-          const delIds = getDeletedDocIds();
           const raw = localStorage.getItem('dms_mock_documents');
           if (raw) {
             const list = JSON.parse(raw);
-            if (Array.isArray(list) && list.length > 0) {
-              // Restore binary file payload links from in-memory cache and enforce deleted statuses
+            const hasLegacyDummy = Array.isArray(list) && list.some(d => d.documentId && d.documentId.startsWith('DOC-0') && (!d.driveFileId || d.driveFileId.startsWith('mock_')));
+            if (hasLegacyDummy) {
+              // Hapus seluruh data dummy localhost agar DMS web apps hanya menampilkan data Google Drive live
+              localStorage.removeItem('dms_mock_documents');
+            } else if (Array.isArray(list) && list.length > 0) {
+              const delIds = getDeletedDocIds();
               list.forEach(doc => {
                 if (delIds.has(doc.documentId) || isDocDeleted(doc)) {
                   doc.isDeleted = true;
@@ -2616,7 +2686,6 @@
       },
       _saveMockDocuments() {
         try {
-          // Do not store heavy base64 strings in localStorage to avoid QuotaExceededError
           const sanitized = (this._mockDocuments || []).map(d => {
             const copy = Object.assign({}, d);
             delete copy._mockDataUrl;
@@ -2640,11 +2709,6 @@
           createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
         },
         {
-          userId: 'USR-DEFAULT', email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer',
-          role: 'SUPER_ADMIN', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
-          createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
-        },
-        {
           userId: 'USR-001-IA', email: 'imam02778@asuransijasindo.co.id', fullName: 'Imam Ashyri',
           role: 'SUPER_ADMIN', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
           createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
@@ -2655,29 +2719,24 @@
           createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
         },
         {
-          userId: 'USR-ADMIN-LEGACY', email: 'admin@enterprise.com', fullName: 'System Administrator',
+          userId: 'USR-DEFAULT', email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer',
           role: 'SUPER_ADMIN', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
           createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
         },
         {
-          userId: 'USR-002', email: 'ratna.sari@jasindo.co.id', fullName: 'dr. Ratna Sari, Sp.PK',
+          userId: 'USR-15546BC3A976C0', email: 'gary.andersen@asuransijasindo.co.id', fullName: 'Gary',
           role: 'USER', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
-          createdAt: '2026-01-10T08:30:00Z', lastLoginAt: new Date(Date.now() - 480 * 60000).toISOString()
+          createdAt: '2026-10-09T09:53:51.793Z', lastLoginAt: new Date(Date.now() - 1440 * 60000).toISOString()
         },
         {
-          userId: 'USR-003', email: 'hendra.k@jasindo.co.id', fullName: 'Ir. Hendra Kusuma, MT',
+          userId: 'USR-647FA66CCF06A0', email: 'herman1999@asuransijasindo.co.id', fullName: 'Herman Prasojo',
           role: 'USER', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
-          createdAt: '2026-01-15T09:00:00Z', lastLoginAt: new Date(Date.now() - 1440 * 60000).toISOString()
+          createdAt: '2026-10-11T14:36:09.929Z', lastLoginAt: new Date(Date.now() - 1440 * 60000).toISOString()
         },
         {
-          userId: 'USR-004', email: 'legal.intern@jasindo.co.id', fullName: 'Amanda Putri, SH',
-          role: 'USER', status: 'PENDING', mustChangePassword: true, password: 'AdminPassword2026!',
-          createdAt: '2026-03-20T10:00:00Z', lastLoginAt: ''
-        },
-        {
-          userId: 'USR-005', email: 'vendor.audit@external.com', fullName: 'Marcus Vance',
-          role: 'USER', status: 'DISABLED', mustChangePassword: false, password: 'AdminPassword2026!',
-          createdAt: '2025-11-01T14:20:00Z', lastLoginAt: '2026-02-01T10:15:00Z'
+          userId: 'USR-ADMIN-LEGACY', email: 'admin@enterprise.com', fullName: 'System Administrator',
+          role: 'SUPER_ADMIN', status: 'ACTIVE', mustChangePassword: false, password: 'AdminPassword2026!',
+          createdAt: '2026-01-01T00:00:00Z', lastLoginAt: new Date(Date.now() - 5 * 60000).toISOString()
         }
       ],
       _mockConfigs: [
@@ -2693,119 +2752,100 @@
         { key: 'EXPIRY_ALERT_DAYS', value: '30', description: 'Days before expiration to begin warning indicators', category: 'Notifications', updatedAt: '2026-01-01T00:00:00Z' }
       ],
       _mockProjects: [
-        { projectId: 'PRJ-0B497C42276B31', projectCode: 'PRJ-2026-001', projectName: 'Kemitraan Asuransi Travel dengan Moda Transportasi', partner: 'PT MRT Jakarta', status: 'ACTIVE', pic: 'M.A Fatwa', driveFolderId: '1mqbh4xZAhh0u8N37Z0yNcFQ0o1FH9QKC', isArchived: false, documentCount: 2, createdAt: '2026-10-09T09:42:53.053Z' },
-        { projectId: 'PRJ-2026-002', projectCode: 'PRJ-2026-002', projectName: 'Pengadaan Lab Terpadu Bidakara', partner: 'PT Bidakara Medika Utama', status: 'ACTIVE', pic: 'Ir. Hendra Kusuma', isArchived: false, documentCount: 1 }
+        {
+          projectId: 'PRJ-0B497C42276B31',
+          projectCode: 'PRJ-2026-001',
+          projectName: 'Kemitraan Asuransi Travel dengan Moda Transportasi',
+          partner: 'PT MRT Jakarta',
+          description: 'Project repository for Kemitraan Asuransi Travel dengan Moda Transportasi',
+          status: 'ACTIVE',
+          pic: 'M.A Fatwa',
+          driveFolderId: '1mqbh4xZAhh0u8N37Z0yNcFQ0o1FH9QKC',
+          isArchived: false,
+          documentCount: 2,
+          createdAt: '2026-10-09T09:42:53.053Z'
+        }
       ],
       _mockRecents: [
         { documentId: 'DOC-6BD0D6C7078705', lastOpenedAt: new Date(Date.now() - 5 * 60000).toISOString() },
-        { documentId: 'DOC-01', lastOpenedAt: new Date(Date.now() - 12 * 60000).toISOString() },
-        { documentId: 'DOC-04', lastOpenedAt: new Date(Date.now() - 95 * 60000).toISOString() }
+        { documentId: 'DOC-6981D9D05CA1FD', lastOpenedAt: new Date(Date.now() - 30 * 60000).toISOString() }
       ],
       _mockAuditLogs: [
         {
           activityId: 'LOG-001', timestamp: new Date(Date.now() - 5 * 60000).toISOString(),
-          userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'LOGIN', targetType: 'USER', targetName: 'admin@enterprise.com', details: 'User authenticated via Web UI',
+          userId: 'USR-JACK', userEmail: 'jackslomberger@gmail.com', userName: 'Jack Slomberger (Super Admin)', role: 'SUPER_ADMIN',
+          action: 'LOGIN', targetType: 'USER', targetName: 'jackslomberger@gmail.com', details: 'User authenticated via Web Portal connected to Google Drive',
           status: 'SUCCESS'
         },
         {
           activityId: 'LOG-002', timestamp: new Date(Date.now() - 15 * 60000).toISOString(),
-          userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
+          userId: 'USR-001-IA', userEmail: 'imam02778@asuransijasindo.co.id', userName: 'Imam Ashyri', role: 'SUPER_ADMIN',
           action: 'VIEW_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-6BD0D6C7078705', targetType: 'DOCUMENT', targetName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
           details: 'Inspected in Document Reader (Google Drive)', status: 'SUCCESS'
         },
         {
-          activityId: 'LOG-003', timestamp: new Date(Date.now() - 120 * 60000).toISOString(),
-          userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
-          action: 'SOFT_DELETE_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-09', targetType: 'DOCUMENT', targetName: 'Draft MoU Fasilitas Parkir Khusus RS.docx',
-          details: 'Moved to Trash Repository', status: 'SUCCESS'
+          activityId: 'LOG-003', timestamp: new Date(Date.now() - 35 * 60000).toISOString(),
+          userId: 'USR-001-IA', userEmail: 'imam02778@asuransijasindo.co.id', userName: 'Imam Ashyri', role: 'SUPER_ADMIN',
+          action: 'VIEW_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-6981D9D05CA1FD', targetType: 'DOCUMENT', targetName: 'PKS MRT Jakarta Sign Off - MRT Jakarta.pdf',
+          details: 'Inspected in Document Reader (Google Drive)', status: 'SUCCESS'
         },
         {
           activityId: 'LOG-004', timestamp: new Date(Date.now() - 24 * 3600000).toISOString(),
-          userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
+          userId: 'USR-001-IA', userEmail: 'imam02778@asuransijasindo.co.id', userName: 'Imam Ashyri', role: 'SUPER_ADMIN',
           action: 'UPLOAD_DOCUMENT', projectId: 'PRJ-0B497C42276B31', documentId: 'DOC-6BD0D6C7078705', targetType: 'DOCUMENT', targetName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
           details: 'Uploaded into 04_BAK folder in Google Drive (jackslomberger@gmail.com)', status: 'SUCCESS'
         },
         {
           activityId: 'LOG-005', timestamp: new Date(Date.now() - 48 * 3600000).toISOString(),
-          userId: 'USR-ADMIN', userEmail: 'admin@enterprise.com', userName: 'System Administrator', role: 'SUPER_ADMIN',
+          userId: 'USR-001-IA', userEmail: 'imam02778@asuransijasindo.co.id', userName: 'Imam Ashyri', role: 'SUPER_ADMIN',
           action: 'CREATE_PROJECT', projectId: 'PRJ-0B497C42276B31', targetType: 'PROJECT', targetName: 'PRJ-2026-001',
           details: 'Initialized 14 standard category folders in Google Drive jackslomberger@gmail.com', status: 'SUCCESS'
         }
       ],
       _mockDocuments: [
         {
-          documentId: 'DOC-6BD0D6C7078705', projectId: 'PRJ-0B497C42276B31', driveFileId: '1k06OI6n0OhvzZNyH47HNzlRc4lBk8_Kb',
+          documentId: 'DOC-6981D9D05CA1FD',
+          projectId: 'PRJ-0B497C42276B31',
+          driveFileId: '1_dOWx1p0GrPcRm7k8gLmQdMRFGtdxzJE',
+          documentName: 'PKS MRT Jakarta Sign Off - MRT Jakarta',
+          fileName: 'PKS MRT Jakarta Sign Off - MRT Jakarta.pdf',
+          category: '01_PKS',
+          description: 'Perjanjian Kerja Sama Kemitraan Asuransi Travel dengan PT MRT Jakarta.',
+          documentDate: '2025-10-30T17:00:00.000Z',
+          effectiveDate: '2025-11-03T17:00:00.000Z',
+          expiryDate: '2028-10-30T17:00:00.000Z',
+          status: 'ACTIVE',
+          classification: 'INTERNAL',
+          fileType: 'PDF',
+          mimeType: 'application/pdf',
+          fileSize: 13804370,
+          tags: 'pks, mrt, mrtj, sponsorship, travel',
+          uploadedBy: 'USR-001-IA',
+          uploadedByName: 'Imam Ashyri',
+          uploadedAt: '2026-10-11T14:41:37.241Z',
+          isFavorite: false
+        },
+        {
+          documentId: 'DOC-6BD0D6C7078705',
+          projectId: 'PRJ-0B497C42276B31',
+          driveFileId: '1k06OI6n0OhvzZNyH47HNzlRc4lBk8_Kb',
           documentName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off',
           fileName: 'BAK Jasindo x MRTJ (Biaya Sponsorship)- Final Sign Off.pdf',
-          category: '04_BAK', description: 'Berita Acara Kesepakatan Sponsorship & Partnership MRT Jakarta x Asuransi Jasindo.',
-          documentDate: '2025-10-31', effectiveDate: '2025-11-04', expiryDate: '2028-10-31', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 641740, tags: 'bak, sponsorship, mrt, mrtj, jasindo',
-          uploadedBy: 'USR-001-IA', uploadedByName: 'Imam Ahmad', uploadedAt: '2026-10-09T09:50:00Z', isFavorite: true
-        },
-        {
-          documentId: 'DOC-01', projectId: 'PRJ-0B497C42276B31', driveFileId: 'mock_drive_file_01', documentName: 'PKS MRT Jakarta Travel Coverage 2026.pdf',
-          category: '01_PKS', description: 'Perjanjian kerjasama induk operasional fasilitas medis dan rujukan 2026.', documentDate: '2026-01-15',
-          effectiveDate: '2026-02-01', expiryDate: '2027-01-31', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 2491024, tags: 'pks, operasional, siloam',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-01-15T10:00:00Z', isFavorite: true
-        },
-        {
-          documentId: 'DOC-02', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_02', documentName: 'Addendum I Pelayanan ICU.pdf',
-          category: '01_PKS', description: 'Penambahan klausul ketersediaan 20 ruang ICU darurat.', documentDate: '2026-03-10',
-          effectiveDate: '2026-03-15', expiryDate: '2026-10-15', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 1145000, tags: 'addendum, icu',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-03-10T11:00:00Z', isFavorite: false
-        },
-        {
-          documentId: 'DOC-03', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_03', documentName: 'NDA Kerahasiaan Rekam Medis.docx',
-          category: '02_NDA', description: 'Perjanjian kerahasiaan data rekam medis pasien terenkripsi AES-256.', documentDate: '2026-01-08',
-          effectiveDate: '2026-01-10', expiryDate: '2029-01-10', status: 'ACTIVE', classification: 'RESTRICTED',
-          fileType: 'DOCX', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fileSize: 450000, tags: 'nda, data, medis',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-01-08T09:00:00Z', isFavorite: false
-        },
-        {
-          documentId: 'DOC-04', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_04', documentName: 'MoU Kerjasama Pendidikan Dokter.pdf',
-          category: '03_MOU', description: 'Nota kesepahaman program residensi dokter dan perawat klinis spesialis.', documentDate: '2025-10-05',
-          effectiveDate: '2025-10-10', expiryDate: '2026-10-05', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 1820000, tags: 'mou, residensi, dokter',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2025-10-05T08:30:00Z', isFavorite: true
-        },
-        {
-          documentId: 'DOC-05', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_05', documentName: 'Polis Asuransi Tanggung Gugat Medis.pdf',
-          category: '05_POLIS_INDUK', description: 'Polis proteksi malpraktik dan risiko pertanggungan tenaga medis rumah sakit.', documentDate: '2025-08-30',
-          effectiveDate: '2025-09-01', expiryDate: '2026-08-30', status: 'EXPIRED', classification: 'CONFIDENTIAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 3250000, tags: 'polis, asuransi, klaim',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2025-08-30T14:20:00Z', isFavorite: false
-        },
-        {
-          documentId: 'DOC-06', projectId: 'PRJ-2026-002', driveFileId: 'mock_drive_file_06', documentName: 'Kajian Risiko Integrasi Sistem HIS.xlsx',
-          category: '07_KAJIAN_MANAJEMEN_RISIKO', description: 'Evaluasi matriks mitigasi risiko interoperabilitas antarmuka HL7 / FHIR.', documentDate: '2026-02-14',
-          effectiveDate: '2026-02-15', expiryDate: '2027-05-20', status: 'ACTIVE', classification: 'RESTRICTED',
-          fileType: 'XLSX', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileSize: 620000, tags: 'his, fhir, risiko',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-02-14T10:15:00Z', isFavorite: true
-        },
-        {
-          documentId: 'DOC-07', projectId: 'PRJ-2026-002', driveFileId: 'mock_drive_file_07', documentName: 'Surat Rekomendasi Dinkes Laboratorium.pdf',
-          category: '09_SURAT', description: 'Surat rekomendasi penetapan standarisasi mutu laboratorium rujukan biosafety level 2.', documentDate: '2026-03-01',
-          effectiveDate: '2026-03-01', expiryDate: '2026-11-20', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'PDF', mimeType: 'application/pdf', fileSize: 890000, tags: 'dinkes, izin, lab',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-03-01T15:00:00Z', isFavorite: false
-        },
-        {
-          documentId: 'DOC-08', projectId: 'PRJ-2026-002', driveFileId: 'mock_drive_file_08', documentName: 'SOP Kalibrasi Alat Hematologi.docx',
-          category: '11_TECHNICAL_OPERATION', description: 'Pedoman standar operasional verifikasi dan pemeliharaan alat analisa darah lengkap.', documentDate: '2026-01-20',
-          effectiveDate: '2026-02-01', expiryDate: '2028-12-31', status: 'ACTIVE', classification: 'INTERNAL',
-          fileType: 'DOCX', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fileSize: 740000, tags: 'sop, hematologi, kalibrasi',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-01-20T11:45:00Z', isFavorite: false
-        },
-        {
-          documentId: 'DOC-09', projectId: 'PRJ-2026-001', driveFileId: 'mock_drive_file_09', documentName: 'Draft MoU Fasilitas Parkir Khusus RS.docx',
-          category: '03_MOU', description: 'Draft awal sewa lahan parkir ambulans dan pasien darurat.', documentDate: '2026-01-10',
-          effectiveDate: '', expiryDate: '', status: 'DRAFT', classification: 'INTERNAL',
-          fileType: 'DOCX', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fileSize: 320000, tags: 'parkir, draft',
-          uploadedBy: 'USR-ADMIN', uploadedAt: '2026-01-10T10:00:00Z', isFavorite: false,
-          isDeleted: true, deletedAt: '2026-09-28T14:30:00Z', deletedBy: 'USR-ADMIN'
+          category: '04_BAK',
+          description: 'Berita Acara Kesepakatan Sponsorship & Partnership MRT Jakarta x Asuransi Jasindo.',
+          documentDate: '2025-10-30T17:00:00.000Z',
+          effectiveDate: '2025-11-03T17:00:00.000Z',
+          expiryDate: '2028-10-30T17:00:00.000Z',
+          status: 'ACTIVE',
+          classification: 'INTERNAL',
+          fileType: 'PDF',
+          mimeType: 'application/pdf',
+          fileSize: 641740,
+          tags: 'bak, sponsorship, mrt, mrtj, jasindo',
+          uploadedBy: 'USR-001-IA',
+          uploadedByName: 'Imam Ashyri',
+          uploadedAt: '2026-10-11T14:44:08.534Z',
+          isFavorite: false
         }
       ],
 
@@ -3037,6 +3077,10 @@
               if (resp.ok) {
                 const resData = await resp.json();
                 if (resData && resData.success === false) {
+                  if (methodName === 'apiGetSystemConfigs') {
+                    this._loadMockConfigs();
+                    return wrappedResolve(this._mockConfigs);
+                  }
                   return reject(new Error(resData.error ? (resData.error.message || resData.error) : 'Google Drive backend error'));
                 } else if (resData && (resData.success === true || resData.data !== undefined)) {
                   const finalVal = resData.data !== undefined ? resData.data : resData;
@@ -3047,6 +3091,10 @@
               console.warn('Apps Script Web App API request failed, evaluating fallback:', netErr);
               if (methodName === 'apiUploadDocument') {
                 return reject(new Error(`Gagal menyimpan ke Google Drive: ${netErr.message}. Pastikan Web App Apps Script di-deploy dengan opsi 'Who has access: Anyone'.`));
+              }
+              if (methodName === 'apiGetSystemConfigs') {
+                this._loadMockConfigs();
+                return wrappedResolve(this._mockConfigs);
               }
             }
           }
@@ -3626,8 +3674,60 @@
       }
     };
 
+    /* USER CREDENTIALS & PASSWORD MANAGEMENT WORKFLOW */
+    const UserPasswordManager = {
+      get(userOrId, email) {
+        const uid = typeof userOrId === 'object' ? (userOrId ? userOrId.userId : '') : (userOrId || '');
+        const uemail = (typeof userOrId === 'object' ? (userOrId ? userOrId.email : '') : (email || '')).toLowerCase();
+        try {
+          const map = JSON.parse(localStorage.getItem('dms_user_passwords') || '{}');
+          if (uid && map[uid]) return map[uid];
+          if (uemail && map[uemail]) return map[uemail];
+        } catch (e) {}
+        if (typeof userOrId === 'object' && userOrId && userOrId.password) return userOrId.password;
+        return 'AdminPassword2026!';
+      },
+      set(userOrId, email, newPassword) {
+        const uid = typeof userOrId === 'object' ? (userOrId ? userOrId.userId : '') : (userOrId || '');
+        const uemail = (typeof userOrId === 'object' ? (userOrId ? userOrId.email : '') : (email || '')).toLowerCase();
+        try {
+          const map = JSON.parse(localStorage.getItem('dms_user_passwords') || '{}');
+          if (uid) map[uid] = newPassword;
+          if (uemail) map[uemail] = newPassword;
+          const info = {
+            password: newPassword,
+            updatedAt: new Date().toISOString()
+          };
+          if (uid) map['updated_' + uid] = info;
+          if (uemail) map['updated_' + uemail] = info;
+          localStorage.setItem('dms_user_passwords', JSON.stringify(map));
+        } catch (e) {}
+      },
+      getUpdatedInfo(userOrId, email) {
+        const uid = typeof userOrId === 'object' ? (userOrId ? userOrId.userId : '') : (userOrId || '');
+        const uemail = (typeof userOrId === 'object' ? (userOrId ? userOrId.email : '') : (email || '')).toLowerCase();
+        try {
+          const map = JSON.parse(localStorage.getItem('dms_user_passwords') || '{}');
+          return (uid && map['updated_' + uid]) || (uemail && map['updated_' + uemail]) || null;
+        } catch (e) {}
+        return null;
+      }
+    };
+
     /* INITIALIZATION */
     document.addEventListener('DOMContentLoaded', () => {
+      // Purge legacy mock documents & projects from localStorage so app directly displays Google Drive live data
+      try {
+        const rawDocs = localStorage.getItem('dms_mock_documents');
+        if (rawDocs && (rawDocs.includes('DOC-01') || rawDocs.includes('mock_drive_file') || rawDocs.includes('Addendum I Pelayanan ICU'))) {
+          localStorage.removeItem('dms_mock_documents');
+        }
+        const rawPrjs = localStorage.getItem('dms_mock_projects');
+        if (rawPrjs && (rawPrjs.includes('PRJ-2026-002') || rawPrjs.includes('Bidakara'))) {
+          localStorage.removeItem('dms_mock_projects');
+        }
+      } catch (e) {}
+
       // Automatic Google Drive Web App endpoint synchronization for all users:
       try {
         const urlParams = new URLSearchParams(window.location.search);
@@ -8095,7 +8195,8 @@ ${440 + streamLen}
                 <th>User Identity</th>
                 <th>Security Role</th>
                 <th>Status</th>
-                <th>Password State</th>
+                <th>Password / Access Key Existing</th>
+                <th>Status Pembaharuan</th>
                 <th>Last Login</th>
                 <th>Created At</th>
                 <th style="text-align: right;">Actions</th>
@@ -8112,6 +8213,10 @@ ${440 + streamLen}
         let statusClass = 'active';
         if (u.status === 'PENDING') statusClass = 'pending';
         else if (u.status === 'DISABLED') statusClass = 'disabled';
+
+        const existingPass = UserPasswordManager.get(u);
+        const updatedInfo = UserPasswordManager.getUpdatedInfo(u);
+        const isRecentlyUpdated = Boolean(updatedInfo);
 
         html += `
           <tr>
@@ -8139,12 +8244,22 @@ ${440 + streamLen}
               </span>
             </td>
             <td>
-              ${u.mustChangePassword ? `
-                <span style="font-size: 11px; color: var(--amber-600); font-weight: 600; display: inline-flex; align-items: center; gap: 3px;">
-                  ⚠️ Change Required
-                </span>
+              <div style="display: flex; align-items: center; gap: 5px;">
+                <code id="user-pass-display-${u.userId}" style="font-family: monospace; font-size: 11px; font-weight: 700; color: #004F8C; background: #F0F9FF; border: 1px solid #BAE6FD; padding: 3px 6px; border-radius: 4px; min-width: 80px; display: inline-block; letter-spacing: 1px;" data-raw-pass="${escapeHtml(existingPass)}" data-masked="true">••••••••</code>
+                <button type="button" class="reader-btn" style="padding: 3px 6px; font-size: 10.5px; background: #FFFFFF; border: 1px solid var(--slate-200);" onclick="toggleUserPasswordVisibility('${u.userId}')" title="Tampilkan/Sembunyikan Password">👁️</button>
+                <button type="button" class="reader-btn" style="padding: 3px 6px; font-size: 10.5px; background: #FFFFFF; border: 1px solid var(--slate-200);" onclick="copyPasswordToClipboard('${escapeHtml(existingPass)}', '${escapeHtml(u.email)}')" title="Salin Password">📋</button>
+              </div>
+            </td>
+            <td>
+              ${isRecentlyUpdated ? `
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <span class="status-pill active" style="font-size: 10px; background-color: #ECFDF5; color: #059669; border-color: #A7F3D0; padding: 2px 6px; font-weight: 700;">
+                    ✨ Baru Diperbarui
+                  </span>
+                  <span style="font-size: 10px; color: var(--slate-500);">Key: <code style="color: #065F46; font-weight: 700; font-family: monospace;">${escapeHtml(updatedInfo.password)}</code></span>
+                </div>
               ` : `
-                <span style="font-size: 11px; color: var(--slate-400);">Normal</span>
+                <span style="font-size: 10.5px; color: var(--slate-400); background: var(--slate-50); border: 1px solid var(--slate-200); padding: 2px 6px; border-radius: 4px;">Default Aktif</span>
               `}
             </td>
             <td>
@@ -8158,10 +8273,10 @@ ${440 + streamLen}
               </div>
             </td>
             <td style="text-align: right; white-space: nowrap;">
-              <button class="reader-btn" style="padding: 3px 6px; font-size: 11px; color: var(--navy-600);" onclick="openEditUserModal('${u.userId}')" title="Edit User">
+              <button class="reader-btn" style="padding: 3px 6px; font-size: 11px; color: var(--navy-600);" onclick="openEditUserModal('${u.userId}')" title="Edit User & Password">
                 ✏️ Edit
               </button>
-              <button class="reader-btn" style="padding: 3px 6px; font-size: 11px; color: var(--amber-600);" onclick="openResetPasswordModal('${u.userId}')" title="Reset Password">
+              <button class="reader-btn" style="padding: 3px 6px; font-size: 11px; color: var(--amber-600);" onclick="openResetPasswordModal('${u.userId}')" title="Reset Key / Password">
                 🔑 Key
               </button>
               ${!isSelf ? `
@@ -8210,12 +8325,17 @@ ${440 + streamLen}
       document.getElementById('user-form-role').value = 'USER';
       document.getElementById('user-form-email').disabled = false;
       document.getElementById('user-form-status-group').style.display = 'none';
+
+      const existingBox = document.getElementById('user-form-existing-password-box');
+      if (existingBox) existingBox.style.display = 'none';
+
       document.getElementById('user-form-password-section').style.display = 'block';
       const label = document.getElementById('user-form-password-label');
       if (label) label.innerText = 'Access Key / Password *';
       const help = document.getElementById('user-form-password-help');
       if (help) help.innerText = 'Key ini langsung divalidasi pada saat login pengguna.';
-      document.getElementById('user-form-password').required = true;
+      const passInput = document.getElementById('user-form-password');
+      passInput.required = true;
       generateRandomPassword('user-form-password');
       document.getElementById('btn-user-submit').innerText = 'Create User';
 
@@ -8223,11 +8343,13 @@ ${440 + streamLen}
     }
 
     function openEditUserModal(userId) {
-      const user = AppState.users.list.find(u => u.userId === userId);
+      const user = (AppState.users.list || []).find(u => u.userId === userId) || (ServerApi._mockUsers || []).find(u => u.userId === userId);
       if (!user) return;
 
+      const existingPass = UserPasswordManager.get(user);
+
       document.getElementById('user-modal-title').innerText = 'Edit User Account & Access Key';
-      document.getElementById('user-modal-subtitle').innerText = `Update identity details and access key for ${user.email}`;
+      document.getElementById('user-modal-subtitle').innerText = `Update identity details and password for ${user.email}`;
       document.getElementById('user-form-id').value = user.userId;
       document.getElementById('user-form-name').value = user.fullName || '';
       document.getElementById('user-form-email').value = user.email;
@@ -8235,14 +8357,29 @@ ${440 + streamLen}
       document.getElementById('user-form-role').value = user.role;
       document.getElementById('user-form-status').value = user.status;
       document.getElementById('user-form-status-group').style.display = 'block';
+
+      // Tampilkan informasi Password Existing
+      const existingBox = document.getElementById('user-form-existing-password-box');
+      if (existingBox) existingBox.style.display = 'block';
+      const existingDisplay = document.getElementById('user-form-existing-password-display');
+      if (existingDisplay) {
+        existingDisplay.innerText = '••••••••';
+        existingDisplay.setAttribute('data-raw-pass', existingPass);
+        existingDisplay.setAttribute('data-masked', 'true');
+      }
+      const toggleBtn = document.getElementById('btn-toggle-modal-pass');
+      if (toggleBtn) toggleBtn.innerText = '👁️ Lihat';
+
+      // Input Ubah Password Baru
       document.getElementById('user-form-password-section').style.display = 'block';
       const label = document.getElementById('user-form-password-label');
-      if (label) label.innerText = 'Access Key / Password (Ubah Key Login)';
+      if (label) label.innerText = 'Ubah Password Baru (Kosongkan jika tidak ada perubahan)';
       const help = document.getElementById('user-form-password-help');
-      if (help) help.innerText = 'Key ini divalidasi langsung saat login. Anda dapat memperbarui key ini kapan saja.';
+      if (help) help.innerText = 'Jika diisi, password baru akan langsung aktif dan ditampilkan setelah disimpan.';
       const passInput = document.getElementById('user-form-password');
       passInput.required = false;
-      passInput.value = user.password || 'AdminPassword2026!';
+      passInput.value = '';
+      passInput.placeholder = 'Ketik password baru jika ingin memperbarui...';
       document.getElementById('btn-user-submit').innerText = 'Save Changes';
 
       document.getElementById('user-modal').style.display = 'flex';
@@ -8266,26 +8403,37 @@ ${440 + streamLen}
         if (!userId) {
           // CREATE
           const email = document.getElementById('user-form-email').value.trim();
+          const initialPass = keyOrPassword || 'AdminPassword2026!';
+          UserPasswordManager.set(email, email, initialPass);
           await ServerApi.call('apiCreateUser', AppState.sessionToken, JSON.stringify({
             email,
             fullName,
             role,
-            tempPassword: keyOrPassword || 'AdminPassword2026!',
-            password: keyOrPassword || 'AdminPassword2026!'
+            tempPassword: initialPass,
+            password: initialPass
           }));
-          showToast(`User '${email}' berhasil dibuat dengan Access Key baru.`, 'success');
+          closeUserModal();
+          showPasswordUpdateSuccessDialog(email, initialPass, 'Akun User Baru Berhasil Dibuat');
         } else {
           // EDIT
+          const email = document.getElementById('user-form-email').value.trim();
           const status = document.getElementById('user-form-status').value;
           const updatePayload = { fullName, role, status };
           if (keyOrPassword) {
             updatePayload.password = keyOrPassword;
             updatePayload.key = keyOrPassword;
+            UserPasswordManager.set(userId, email, keyOrPassword);
+            const userInList = (AppState.users.list || []).find(u => u.userId === userId);
+            if (userInList) userInList.password = keyOrPassword;
           }
           await ServerApi.call('apiUpdateUser', AppState.sessionToken, userId, JSON.stringify(updatePayload));
-          showToast('User account & validasi key login berhasil diperbarui.', 'success');
+          closeUserModal();
+          if (keyOrPassword) {
+            showPasswordUpdateSuccessDialog(email, keyOrPassword, 'Pembaharuan Password User');
+          } else {
+            showToast('Informasi profil pengguna berhasil diperbarui.', 'success');
+          }
         }
-        closeUserModal();
         loadUsersList();
       } catch (err) {
         showToast('Operation failed: ' + err.message, 'error');
@@ -8295,13 +8443,20 @@ ${440 + streamLen}
     }
 
     function openResetPasswordModal(userId) {
-      const user = AppState.users.list.find(u => u.userId === userId);
+      const user = (AppState.users.list || []).find(u => u.userId === userId) || (ServerApi._mockUsers || []).find(u => u.userId === userId);
       if (!user) return;
 
+      const existingPass = UserPasswordManager.get(user);
       document.getElementById('reset-user-id').value = user.userId;
-      document.getElementById('reset-modal-user-label').innerText = `Atur Access Key / Password baru untuk ${user.fullName} (${user.email})`;
-      generateRandomPassword('reset-new-password');
+      document.getElementById('reset-modal-user-label').innerText = `Atur Access Key / Password baru untuk ${user.fullName || user.email} (${user.email})`;
 
+      const existingDisplay = document.getElementById('reset-modal-existing-password-display');
+      if (existingDisplay) {
+        existingDisplay.innerText = existingPass;
+        existingDisplay.setAttribute('data-raw-pass', existingPass);
+      }
+
+      generateRandomPassword('reset-new-password');
       document.getElementById('reset-password-modal').style.display = 'flex';
     }
 
@@ -8312,19 +8467,109 @@ ${440 + streamLen}
     async function handleResetPasswordSubmit(e) {
       e.preventDefault();
       const userId = document.getElementById('reset-user-id').value;
+      const user = (AppState.users.list || []).find(u => u.userId === userId) || (ServerApi._mockUsers || []).find(u => u.userId === userId);
       const tempPassword = document.getElementById('reset-new-password').value.trim();
       const btn = document.getElementById('btn-reset-submit');
       btn.disabled = true;
 
       try {
+        const userEmail = user ? user.email : 'User';
+        UserPasswordManager.set(userId, userEmail, tempPassword);
+        if (user) user.password = tempPassword;
+
         await ServerApi.call('apiResetUserPassword', AppState.sessionToken, userId, tempPassword);
-        showToast('Access Key berhasil direset & langsung aktif untuk validasi login.', 'success');
         closeResetPasswordModal();
+        showPasswordUpdateSuccessDialog(userEmail, tempPassword, 'Reset Access Key / Password');
         loadUsersList();
       } catch (err) {
         showToast('Reset failed: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
+      }
+    }
+
+    /* PASSWORD DISPLAY, VISIBILITY & CLIPBOARD HELPERS */
+    function toggleUserPasswordVisibility(userId) {
+      const el = document.getElementById('user-pass-display-' + userId);
+      if (!el) return;
+      const raw = el.getAttribute('data-raw-pass') || 'AdminPassword2026!';
+      const isMasked = el.getAttribute('data-masked') === 'true';
+      if (isMasked) {
+        el.innerText = raw;
+        el.setAttribute('data-masked', 'false');
+        el.style.backgroundColor = '#FEF3C7';
+        el.style.borderColor = '#FCD34D';
+        el.style.color = '#92400E';
+      } else {
+        el.innerText = '••••••••';
+        el.setAttribute('data-masked', 'true');
+        el.style.backgroundColor = '#F0F9FF';
+        el.style.borderColor = '#BAE6FD';
+        el.style.color = '#004F8C';
+      }
+    }
+
+    function copyPasswordToClipboard(pass, email) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(pass).then(() => {
+          showToast(`Password untuk ${email || 'user'} berhasil disalin ke clipboard!`, 'success');
+        }).catch(() => {
+          prompt('Salin password berikut:', pass);
+        });
+      } else {
+        prompt('Salin password berikut:', pass);
+      }
+    }
+
+    function toggleExistingPasswordModalView() {
+      const el = document.getElementById('user-form-existing-password-display');
+      const btn = document.getElementById('btn-toggle-modal-pass');
+      if (!el) return;
+      const raw = el.getAttribute('data-raw-pass') || 'AdminPassword2026!';
+      const isMasked = el.getAttribute('data-masked') === 'true';
+      if (isMasked) {
+        el.innerText = raw;
+        el.setAttribute('data-masked', 'false');
+        if (btn) btn.innerText = '🙈 Tutup';
+      } else {
+        el.innerText = '••••••••';
+        el.setAttribute('data-masked', 'true');
+        if (btn) btn.innerText = '👁️ Lihat';
+      }
+    }
+
+    function copyExistingPasswordFromModal() {
+      const el = document.getElementById('user-form-existing-password-display');
+      const raw = (el ? el.getAttribute('data-raw-pass') : '') || 'AdminPassword2026!';
+      copyPasswordToClipboard(raw, 'user');
+    }
+
+    function copyResetExistingPasswordFromModal() {
+      const el = document.getElementById('reset-modal-existing-password-display');
+      const raw = (el ? el.getAttribute('data-raw-pass') : '') || 'AdminPassword2026!';
+      copyPasswordToClipboard(raw, 'user');
+    }
+
+    function showPasswordUpdateSuccessDialog(email, newPass, title) {
+      const modal = document.getElementById('password-update-success-modal');
+      const emailEl = document.getElementById('pass-success-user-email');
+      const passInput = document.getElementById('pass-success-new-password');
+      if (emailEl) emailEl.innerText = `${title || 'Password Berhasil Diperbarui'} - Akun: ${email}`;
+      if (passInput) passInput.value = newPass;
+      if (modal) modal.style.display = 'flex';
+      showToast(`Password baru untuk '${email}' berhasil disimpan & langsung aktif.`, 'success');
+    }
+
+    function closePasswordSuccessModal() {
+      const modal = document.getElementById('password-update-success-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function copyPasswordFromSuccessModal() {
+      const passInput = document.getElementById('pass-success-new-password');
+      const pass = passInput ? passInput.value : '';
+      if (pass) {
+        copyPasswordToClipboard(pass, 'user');
       }
     }
 
@@ -8367,17 +8612,12 @@ ${440 + streamLen}
        SYSTEM SETTINGS & CONFIGURATION CONTROLLER
        -------------------------------------------------------------------------- */
     async function renderSettingsView(canvas) {
-      if (!AppState.currentUser || AppState.currentUser.role !== 'SUPER_ADMIN') {
-        canvas.innerHTML = `
-          <div class="empty-state" style="margin-top: 5rem;">
-            <div class="empty-state-icon" style="color: var(--rose-600);">🚫</div>
-            <h3 class="empty-state-title">Access Restricted</h3>
-            <p class="empty-state-desc">System Settings require Super Administrator privileges.</p>
-            <button class="btn-primary" onclick="navigateTo('EXPLORER')">Return to Document Explorer</button>
-          </div>
-        `;
+      if (!AppState.currentUser) {
+        showLoginScreen();
         return;
       }
+
+      const isSuperAdmin = AppState.currentUser.role === 'SUPER_ADMIN';
 
       // Pastikan config default selalu tersedia di memori untuk instan 0ms render
       if (!AppState.settings.configs || AppState.settings.configs.length === 0) {
@@ -8395,7 +8635,7 @@ ${440 + streamLen}
                 <span class="action-pill auth">CONFIG Master</span>
               </div>
               <p style="font-size: 12px; color: var(--slate-500); margin-top: 4px;">
-                Configure enterprise security timeouts, retention schedules, storage quotas, and portal behaviors. Changes are tracked in Audit Logs.
+                Konfigurasi batas sesi keamanan, jadwal retensi, kuota penyimpanan, dan koneksi Google Drive (jackslomberger@gmail.com).
               </p>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -8424,13 +8664,16 @@ ${440 + streamLen}
       // INSTANT RENDER (0ms): Langsung render formulir pengaturan tanpa jeda spinner
       renderSettingsSections(AppState.settings.configs);
 
-      // Background silent revalidation dari Google Apps Script jika terhubung
+      // Background silent revalidation dari Google Apps Script jika terhubung (tidak memblokir atau me-reload tampilan)
       loadSystemConfigs(false);
     }
 
     async function loadSystemConfigs(isManualReload = false) {
       const container = document.getElementById('settings-cards-container');
       if (!container) return;
+
+      if (window._isSyncingConfigs) return;
+      window._isSyncingConfigs = true;
 
       const reloadBtn = document.getElementById('btn-reload-settings');
       if (isManualReload && reloadBtn) {
@@ -8448,13 +8691,14 @@ ${440 + streamLen}
           }
         }
         if (isManualReload) {
-          showToast('Konfigurasi sistem berhasil diperbarui.', 'success');
+          showToast('Konfigurasi sistem berhasil dimuat.', 'success');
         }
       } catch (err) {
         if (isManualReload) {
-          showToast('Gagal memuat konfigurasi dari server: ' + err.message, 'error');
+          showToast('Konfigurasi aktif dipertahankan.', 'info');
         }
       } finally {
+        window._isSyncingConfigs = false;
         if (isManualReload && reloadBtn) {
           reloadBtn.disabled = false;
           reloadBtn.innerHTML = '<span>🔄 Reload</span>';
