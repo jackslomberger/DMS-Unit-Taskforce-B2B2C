@@ -79,8 +79,8 @@
       justify-content: center;
     }
     .sidebar-header {
-      height: var(--topbar-height); display: flex; align-items: center; padding: 0 1rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08); gap: 0.65rem; overflow: hidden;
+      min-height: var(--topbar-height); height: auto; display: flex; align-items: center; padding: 0.55rem 0.85rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08); gap: 0.6rem; overflow: hidden;
       transition: var(--transition-smooth);
     }
     .sidebar-brand-icon {
@@ -89,10 +89,10 @@
       padding: 3px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); flex-shrink: 0;
       transition: var(--transition-smooth);
     }
-    .sidebar-brand-text { display: flex; flex-direction: column; white-space: nowrap; min-width: 0; }
+    .sidebar-brand-text { display: flex; flex-direction: column; flex: 1; min-width: 0; white-space: normal; }
     .sidebar.collapsed .sidebar-brand-text { display: none; }
-    .brand-title { font-size: 12.5px; font-weight: 700; color: #FFFFFF; line-height: 1.25; letter-spacing: -0.01em; white-space: nowrap; }
-    .brand-subtitle { font-size: 9.5px; font-weight: 700; text-transform: uppercase; color: #38BDF8; letter-spacing: 0.5px; margin-top: 1px; }
+    .brand-title { font-size: 11.5px; font-weight: 700; color: #FFFFFF; line-height: 1.2; letter-spacing: -0.01em; white-space: normal; word-break: break-word; overflow-wrap: break-word; }
+    .brand-subtitle { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #38BDF8; letter-spacing: 0.5px; margin-top: 2px; white-space: normal; }
 
     .sidebar-nav { flex: 1; padding: 0.75rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.2rem; }
     .nav-section-title {
@@ -6663,30 +6663,6 @@ ${440 + streamLen}
     async function renderDashboardView(canvas) {
       canvas.innerHTML = `
         <div class="dashboard-view">
-          <!-- LIVE GOOGLE DRIVE REPOSITORY SYNC HEADER -->
-          <div style="background: linear-gradient(135deg, #F0F9FF 0%, #FFFFFF 100%); border: 1px solid #BAE6FD; border-radius: 10px; padding: 0.85rem 1.1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-              <div style="width: 36px; height: 36px; border-radius: 8px; background: #004F8C; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;">☁️</div>
-              <div style="min-width: 0;">
-                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                  <strong style="font-size: 13px; color: var(--navy-900);">Live Google Drive Repository: <span style="color: #004F8C;">DMS_ROOT_REPOSITORY</span></strong>
-                  <span id="dash-gdrive-badge" style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE;">⏳ Sinkronisasi...</span>
-                </div>
-                <div id="dash-gdrive-sync-status" style="font-size: 11px; color: var(--slate-600); margin-top: 2px;">
-                  Sumber data langsung: <strong>jackslomberger@gmail.com</strong> &bull; Folder <strong>DMS_ROOT_REPOSITORY</strong> (tanpa data dummy lokal)
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-              <button type="button" class="btn-secondary" id="btn-dash-sync-gdrive" onclick="syncDashboardFromGoogleDrive(true)" style="height: 32px; font-size: 11.5px; padding: 0 12px; background: #FFFFFF; border-color: #BAE6FD; color: #004F8C; font-weight: 600;">
-                <span>🔄 Sinkronkan Google Drive</span>
-              </button>
-              <a href="https://drive.google.com/drive/u/0/my-drive" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="height: 32px; font-size: 11.5px; padding: 0 10px; text-decoration: none; display: inline-flex; align-items: center;">
-                <span>📁 Buka Drive</span>
-              </a>
-            </div>
-          </div>
-
           <!-- QUICK ACTION STRIP -->
           <div class="quick-action-strip">
             <button class="quick-chip-btn" onclick="navigateTo('SEARCH')">
@@ -6821,34 +6797,6 @@ ${440 + streamLen}
 
     function renderDashboardLiveContent() {
       if (AppState.currentRoute !== 'DASHBOARD') return;
-
-      const badgeEl = document.getElementById('dash-gdrive-badge');
-      const statusEl = document.getElementById('dash-gdrive-sync-status');
-
-      if (!ServerApi._cloudSynced && ServerApi._syncError) {
-        if (badgeEl) {
-          badgeEl.innerText = '⚠️ Gagal Sinkronisasi';
-          badgeEl.style.background = '#FEF2F2';
-          badgeEl.style.color = '#DC2626';
-          badgeEl.style.borderColor = '#FECACA';
-        }
-        if (statusEl) {
-          statusEl.innerText = ServerApi._syncError;
-        }
-      } else if (ServerApi._cloudSynced) {
-        if (badgeEl) {
-          badgeEl.innerText = '🟢 Live Tersinkronisasi';
-          badgeEl.style.background = '#ECFDF5';
-          badgeEl.style.color = '#047857';
-          badgeEl.style.borderColor = '#A7F3D0';
-        }
-        if (statusEl) {
-          const timeLabel = ServerApi._lastCloudSyncAt && typeof formatDateTimeShort === 'function'
-            ? formatDateTimeShort(ServerApi._lastCloudSyncAt)
-            : 'Baru saja';
-          statusEl.innerHTML = `Sumber data langsung: <strong>jackslomberger@gmail.com</strong> &bull; Folder <strong>DMS_ROOT_REPOSITORY</strong> &bull; Sinkronisasi terakhir: <strong>${escapeHtml(timeLabel)}</strong>`;
-        }
-      }
 
       const projects = (AppState.projectsList && AppState.projectsList.length > 0 ? AppState.projectsList : (ServerApi._mockProjects || []))
         .filter(p => p && !p.isArchived && p.status !== 'ARCHIVED');
