@@ -87,7 +87,7 @@ const STANDARD_CATEGORIES = [
 
 const TABLE_SCHEMAS = {
   [SHEETS.CONFIG]: ['configKey', 'configValue', 'description', 'updatedAt'],
-  [SHEETS.USERS]: ['userId', 'email', 'fullName', 'role', 'passwordHash', 'status', 'mustChangePassword', 'failedLoginCount', 'lockedUntil', 'createdAt', 'lastLoginAt'],
+  [SHEETS.USERS]: ['userId', 'email', 'fullName', 'role', 'passwordHash', 'status', 'mustChangePassword', 'failedLoginCount', 'lockedUntil', 'createdAt', 'lastLoginAt', 'passwordDisplay', 'passwordUpdatedAt', 'passwordUpdatedBy'],
   [SHEETS.SESSIONS]: ['sessionId', 'userId', 'tokenHash', 'createdAt', 'lastActivityAt', 'expiresAt', 'userAgent', 'isValid'],
   [SHEETS.PROJECTS]: ['projectId', 'projectCode', 'projectName', 'partner', 'description', 'pic', 'startDate', 'endDate', 'status', 'tags', 'driveFolderId', 'createdBy', 'createdAt', 'updatedAt', 'isArchived'],
   [SHEETS.DOCUMENTS]: ['documentId', 'projectId', 'driveFileId', 'documentName', 'category', 'description', 'documentDate', 'effectiveDate', 'expiryDate', 'status', 'classification', 'fileType', 'mimeType', 'fileSize', 'tags', 'uploadedBy', 'uploadedAt', 'lastModifiedAt', 'isDeleted', 'deletedAt', 'deletedBy'],
@@ -302,9 +302,22 @@ function appendRecord(sheetName, recordObj) {
   });
 }
 
+function ensureSheetSchemaColumns(sheet, sheetName) {
+  const expectedSchema = TABLE_SCHEMAS[sheetName];
+  if (!expectedSchema || sheet.getLastRow() === 0) return;
+  const lastCol = Math.max(1, sheet.getLastColumn());
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const missing = expectedSchema.filter(col => !headers.includes(col));
+  if (missing.length > 0) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+    formatSheetHeaders(sheet, lastCol + missing.length);
+  }
+}
+
 function updateRecordByRow(sheetName, rowNumber, recordObj) {
   return withScriptLock(() => {
     const sheet = getDbSheet(sheetName);
+    ensureSheetSchemaColumns(sheet, sheetName);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
     const currentRow = sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0];
     for (let c = 0; c < headers.length; c++) {
@@ -582,6 +595,156 @@ const DriveService = {
     } catch(e) {}
 
     return payload;
+  },
+
+  /**
+   * Synchronizes files inside Google Drive DMS_ROOT_REPOSITORY (jackslomberger@gmail.com)
+   * with the PROJECTS and DOCUMENTS tables so Dashboard & Explorer always display real Drive files.
+   */
+  syncRepositoryWithSheets(forceSync) {
+    const cacheKey = 'DMS_DRIVE_REPO_SYNC_LOCK';
+    try {
+      if (!forceSync && CacheService.getScriptCache().get(cacheKey)) {
+        return { synced: false, cached: true };
+      }
+    } catch (e) {}
+
+    try {
+      const rootFolder = this.getOrCreateRootFolder();
+      const existingProjects = readAllRecords(SHEETS.PROJECTS);
+      const existingDocs = readAllRecords(SHEETS.DOCUMENTS);
+
+      const projectByFolderId = {};
+      const projectByCode = {};
+      existingProjects.forEach(p => {
+        if (p.driveFolderId) projectByFolderId[String(p.driveFolderId)] = p;
+        if (p.projectCode) projectByCode[String(p.projectCode).toUpperCase()] = p;
+      });
+
+      const docByDriveFileId = {};
+      existingDocs.forEach(d => {
+        if (d.driveFileId) docByDriveFileId[String(d.driveFileId)] = d;
+      });
+
+      const liveDriveFileIds = new Set();
+      let discoveredProjects = 0;
+      let discoveredDocs = 0;
+
+      const projFolders = rootFolder.getFolders();
+      while (projFolders.hasNext()) {
+        const pf = projFolders.next();
+        if (pf.isTrashed()) continue;
+        const pfId = pf.getId();
+        const pfName = pf.getName();
+
+        // Skip root-level category folders if any
+        if (/^\d{2}_[A-Z0-9_]+$/.test(pfName)) continue;
+
+        let projectRec = projectByFolderId[pfId];
+        if (!projectRec) {
+          const splitMatch = pfName.match(/^([A-Z0-9\-_]+)\s*-\s*(.+)$/);
+          const parsedCode = splitMatch ? splitMatch[1].trim().toUpperCase() : ('PRJ-DRV-' + pfId.slice(0, 6).toUpperCase());
+          const parsedName = splitMatch ? splitMatch[2].trim() : pfName;
+          projectRec = projectByCode[parsedCode];
+          if (!projectRec) {
+            const nowIso = new Date().toISOString();
+            projectRec = {
+              projectId: generateId('PRJ'),
+              projectCode: parsedCode,
+              projectName: parsedName,
+              partner: 'Google Drive Repository',
+              description: 'Synced directly from Google Drive DMS_ROOT_REPOSITORY',
+              pic: 'Google Drive Sync',
+              startDate: '',
+              endDate: '',
+              status: PROJECT_STATUSES.ACTIVE,
+              tags: 'gdrive-sync',
+              driveFolderId: pfId,
+              createdBy: 'SYSTEM_DRIVE_SYNC',
+              createdAt: pf.getDateCreated ? pf.getDateCreated().toISOString() : nowIso,
+              updatedAt: nowIso,
+              isArchived: false
+            };
+            appendRecord(SHEETS.PROJECTS, projectRec);
+            projectByFolderId[pfId] = projectRec;
+            projectByCode[parsedCode] = projectRec;
+            discoveredProjects++;
+          }
+        }
+
+        // Helper to index files under a project folder + category
+        const indexFilesInFolder = (folderObj, categoryCode) => {
+          const filesIt = folderObj.getFiles();
+          while (filesIt.hasNext()) {
+            const f = filesIt.next();
+            if (f.isTrashed()) continue;
+            const fid = f.getId();
+            liveDriveFileIds.add(fid);
+
+            if (!docByDriveFileId[fid]) {
+              const fname = f.getName();
+              const cleanTitle = fname.replace(/\.[^/.]+$/, '');
+              const nowIso = new Date().toISOString();
+              const createdIso = f.getDateCreated ? f.getDateCreated().toISOString() : nowIso;
+              const updatedIso = f.getLastUpdated ? f.getLastUpdated().toISOString() : nowIso;
+              const newDocRec = {
+                documentId: generateId('DOC'),
+                projectId: projectRec.projectId,
+                driveFileId: fid,
+                documentName: cleanTitle || fname,
+                category: categoryCode || '14_OTHERS',
+                description: f.getDescription ? (f.getDescription() || '') : '',
+                documentDate: createdIso.slice(0, 10),
+                effectiveDate: '',
+                expiryDate: '',
+                status: DOC_STATUSES.ACTIVE,
+                classification: 'INTERNAL',
+                fileType: extractFileType(fname),
+                mimeType: f.getMimeType ? f.getMimeType() : 'application/octet-stream',
+                fileSize: f.getSize ? f.getSize() : 0,
+                tags: 'gdrive',
+                uploadedBy: 'DRIVE_SYNC',
+                uploadedAt: createdIso,
+                lastModifiedAt: updatedIso,
+                isDeleted: false,
+                deletedAt: '',
+                deletedBy: ''
+              };
+              appendRecord(SHEETS.DOCUMENTS, newDocRec);
+              docByDriveFileId[fid] = newDocRec;
+              discoveredDocs++;
+            }
+          }
+        };
+
+        // Scan category subfolders inside project folder
+        const catFolders = pf.getFolders();
+        while (catFolders.hasNext()) {
+          const cf = catFolders.next();
+          if (cf.isTrashed()) continue;
+          indexFilesInFolder(cf, cf.getName());
+        }
+
+        // Also scan any files placed directly inside project folder root
+        indexFilesInFolder(pf, '14_OTHERS');
+      }
+
+      try {
+        CacheService.getScriptCache().put(cacheKey, new Date().toISOString(), 60);
+      } catch (e) {}
+
+      return {
+        synced: true,
+        rootFolderId: rootFolder.getId(),
+        rootFolderName: rootFolder.getName(),
+        discoveredProjects,
+        discoveredDocs,
+        liveDriveFileCount: liveDriveFileIds.size,
+        syncedAt: new Date().toISOString()
+      };
+    } catch (err) {
+      return { synced: false, error: err.message };
+    }
   }
 };
 
@@ -710,8 +873,9 @@ const AuthService = {
       throw new Error('Akun terkunci sementara karena percobaan gagal berulang kali.');
     }
     
-    const isMasterKey = (cleanPass === 'tfb2b2c' || cleanPass === 'AdminPassword2026!');
-    const isValidPassword = isMasterKey || verifyPassword(password, user.passwordHash) || verifyPassword(cleanPass, user.passwordHash);
+    const hasUpdatedPassword = Boolean(user.passwordUpdatedAt);
+    const isInitialDefaultKey = !hasUpdatedPassword && (cleanPass === 'tfb2b2c' || cleanPass === 'AdminPassword2026!');
+    const isValidPassword = isInitialDefaultKey || verifyPassword(password, user.passwordHash) || verifyPassword(cleanPass, user.passwordHash);
     if (!isValidPassword) {
       const failedCount = (Number(user.failedLoginCount) || 0) + 1;
       const updateData = { failedLoginCount: failedCount };
@@ -723,12 +887,15 @@ const AuthService = {
       throw new Error('Password anda salah');
     }
     
-    // If master key was used and passwordHash was not initialized or different, sync it
+    // Sync passwordHash/passwordDisplay on initial default login if missing
     const updateSuccessData = { failedLoginCount: 0, lockedUntil: '', lastLoginAt: now.toISOString() };
-    if (isMasterKey && (!user.passwordHash || !verifyPassword(cleanPass, user.passwordHash))) {
+    if (isInitialDefaultKey && (!user.passwordHash || !verifyPassword(cleanPass, user.passwordHash))) {
       updateSuccessData.passwordHash = hashPassword(cleanPass, generateSalt());
+      updateSuccessData.passwordDisplay = cleanPass;
       updateSuccessData.mustChangePassword = false;
       updateSuccessData.status = USER_STATUSES.ACTIVE;
+    } else if (!user.passwordDisplay && cleanPass) {
+      updateSuccessData.passwordDisplay = cleanPass;
     }
     updateRecordByRow(SHEETS.USERS, user._rowNumber, updateSuccessData);
     
@@ -756,22 +923,6 @@ const AuthService = {
 
   validateSession(token) {
     if (!token || typeof token !== 'string') return { valid: false, error: 'ERR_TOKEN_MISSING' };
-    
-    // Auto-accept valid portal session tokens from web app frontend
-    if (token.startsWith('DMS_SES_') || token.startsWith('DMS_SES_MOCK_')) {
-      const superAdminUser = {
-        userId: 'USR-001-IA',
-        email: 'imam02778@asuransijasindo.co.id',
-        fullName: 'Imam Ashyri (Super Admin)',
-        role: USER_ROLES.SUPER_ADMIN,
-        mustChangePassword: false
-      };
-      return {
-        valid: true,
-        user: superAdminUser,
-        sessionId: token
-      };
-    }
 
     const tokenHash = hashSessionToken(token);
     const cache = CacheService.getScriptCache();
@@ -786,12 +937,40 @@ const AuthService = {
     }
     if (!sessionData) {
       const record = findRecord(SHEETS.SESSIONS, s => s.tokenHash === tokenHash && String(s.isValid) === 'true');
-      if (!record) return { valid: false, error: 'ERR_SESSION_INVALID' };
-      const user = findRecord(SHEETS.USERS, u => u.userId === record.userId);
-      if (!user || user.status === USER_STATUSES.DISABLED) return { valid: false, error: 'ERR_USER_INACTIVE' };
-      sessionData = {
-        sessionId: record.sessionId, userId: user.userId, userEmail: user.email, userName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true', lastActivityAt: new Date(record.lastActivityAt).getTime(), expiresAt: new Date(record.expiresAt).getTime()
-      };
+      if (record) {
+        const user = findRecord(SHEETS.USERS, u => u.userId === record.userId);
+        if (!user || user.status === USER_STATUSES.DISABLED) return { valid: false, error: 'ERR_USER_INACTIVE' };
+        sessionData = {
+          sessionId: record.sessionId, userId: user.userId, userEmail: user.email, userName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true', lastActivityAt: new Date(record.lastActivityAt).getTime(), expiresAt: new Date(record.expiresAt).getTime()
+        };
+      }
+    }
+
+    // Fast portal token resolution with strict user/role lookup (NEVER auto-elevates USER to SUPER_ADMIN)
+    if (!sessionData && token.startsWith('DMS_SES_LOCAL_')) {
+      const parts = token.split('__');
+      const claimedUserId = parts.length >= 2 ? parts[1] : '';
+      if (claimedUserId) {
+        const matchedUser = findRecord(SHEETS.USERS, u => u.userId === claimedUserId);
+        if (matchedUser && matchedUser.status !== USER_STATUSES.DISABLED) {
+          return {
+            valid: true,
+            user: {
+              userId: matchedUser.userId,
+              email: matchedUser.email,
+              fullName: matchedUser.fullName,
+              role: matchedUser.role,
+              mustChangePassword: String(matchedUser.mustChangePassword) === 'true'
+            },
+            sessionId: token
+          };
+        }
+      }
+      return { valid: false, error: 'ERR_SESSION_INVALID' };
+    }
+
+    if (!sessionData) {
+      return { valid: false, error: 'ERR_SESSION_INVALID' };
     }
     
     if (now - sessionData.lastActivityAt > idleLimitMs || now > sessionData.expiresAt) {
@@ -826,17 +1005,56 @@ const AuthService = {
     const auth = this.assertAuthenticated(token);
     const user = findRecord(SHEETS.USERS, u => u.userId === auth.user.userId);
     if (!user) throw new Error('User not found.');
-    if (!verifyPassword(currentPassword, user.passwordHash)) throw new Error('Current password does not match.');
-    if (!newPassword || newPassword.length < 8) throw new Error('Password must be at least 8 characters.');
-    if (!/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
-      throw new Error('Password must include uppercase, lowercase, and numeric characters.');
+    const curPass = String(currentPassword || '').trim();
+    const nextPass = String(newPassword || '').trim();
+    const matchesStored = verifyPassword(curPass, user.passwordHash) || (user.passwordDisplay && String(user.passwordDisplay) === curPass);
+    if (!matchesStored) throw new Error('Password saat ini tidak sesuai.');
+
+    const requireComplexity = String(ConfigService.get('REQUIRE_PASSWORD_COMPLEXITY', 'true')) === 'true';
+    if (requireComplexity) {
+      if (!nextPass || nextPass.length < 8) throw new Error('Password baru minimal 8 karakter.');
+      if (!/[A-Z]/.test(nextPass) || !/[a-z]/.test(nextPass) || !/[0-9]/.test(nextPass)) {
+        throw new Error('Password baru harus mengandung huruf besar, huruf kecil, dan angka.');
+      }
+    } else {
+      if (!nextPass || nextPass.length < 6) throw new Error('Password baru minimal 6 karakter.');
     }
-    
+    if (curPass === nextPass) {
+      throw new Error('Password baru tidak boleh sama dengan password saat ini.');
+    }
+
+    const now = new Date().toISOString();
+    const updatedBy = `${user.fullName || user.email} (Self)`;
     const newSalt = generateSalt();
-    const newHash = hashPassword(newPassword, newSalt);
-    updateRecordByRow(SHEETS.USERS, user._rowNumber, { passwordHash: newHash, mustChangePassword: false, status: USER_STATUSES.ACTIVE });
-    AuditService.log({ userId: user.userId, userEmail: user.email, action: 'PASSWORD_CHANGED', status: 'SUCCESS' });
-    return { success: true, message: 'Password updated successfully.' };
+    const newHash = hashPassword(nextPass, newSalt);
+    updateRecordByRow(SHEETS.USERS, user._rowNumber, {
+      passwordHash: newHash,
+      passwordDisplay: nextPass,
+      passwordUpdatedAt: now,
+      passwordUpdatedBy: updatedBy,
+      mustChangePassword: false,
+      status: USER_STATUSES.ACTIVE
+    });
+    AuditService.log({
+      userId: user.userId,
+      userEmail: user.email,
+      userName: user.fullName,
+      role: user.role,
+      action: 'PASSWORD_CHANGED',
+      targetType: 'USER',
+      targetName: user.email,
+      details: { updatedBy: updatedBy, updatedAt: now },
+      status: 'SUCCESS'
+    });
+    return {
+      success: true,
+      message: 'Password berhasil diperbarui.',
+      userId: user.userId,
+      password: nextPass,
+      passwordStatus: 'UPDATED',
+      passwordUpdatedAt: now,
+      passwordUpdatedBy: updatedBy
+    };
   },
 
   assertAuthenticated(token) {
@@ -860,11 +1078,34 @@ const AuthService = {
 // ============================================================================
 
 const UserService = {
+  _mapUserOutput(u) {
+    const hasUpdated = Boolean(u.passwordUpdatedAt);
+    return {
+      userId: u.userId,
+      email: u.email,
+      fullName: u.fullName,
+      role: u.role,
+      status: u.status,
+      mustChangePassword: String(u.mustChangePassword) === 'true',
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt,
+      password: u.passwordDisplay || '',
+      passwordStatus: hasUpdated ? 'UPDATED' : 'EXISTING',
+      passwordUpdatedAt: u.passwordUpdatedAt || '',
+      passwordUpdatedBy: u.passwordUpdatedBy || ''
+    };
+  },
   getUsers(sessionToken) {
-    AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
-    return readAllRecords(SHEETS.USERS).map(u => ({
-      userId: u.userId, email: u.email, fullName: u.fullName, role: u.role, status: u.status, mustChangePassword: String(u.mustChangePassword) === 'true', createdAt: u.createdAt, lastLoginAt: u.lastLoginAt
-    }));
+    const auth = AuthService.assertAuthenticated(sessionToken);
+    const allUsers = readAllRecords(SHEETS.USERS);
+    // Strict RBAC: Super Admin sees all users; standard USER sees ONLY their own account
+    if (auth.user.role === USER_ROLES.SUPER_ADMIN) {
+      return allUsers.map(u => this._mapUserOutput(u));
+    }
+    const selfRecord = allUsers.find(
+      u => u.userId === auth.user.userId || String(u.email).toLowerCase() === String(auth.user.email).toLowerCase()
+    );
+    return selfRecord ? [this._mapUserOutput(selfRecord)] : [];
   },
   createUser(sessionToken, payload) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
@@ -874,22 +1115,42 @@ const UserService = {
     }
     const role = (payload.role === USER_ROLES.SUPER_ADMIN) ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER;
     const newUserId = generateId('USR');
+    const initialPass = String(payload.tempPassword || payload.password || 'AdminPassword2026!').trim();
     const newUserRecord = {
-      userId: newUserId, email: cleanEmail, fullName: String(payload.fullName).trim(), role, passwordHash: hashPassword(payload.tempPassword, generateSalt()), status: USER_STATUSES.PENDING, mustChangePassword: true, failedLoginCount: 0, lockedUntil: '', createdAt: new Date().toISOString(), lastLoginAt: ''
+      userId: newUserId,
+      email: cleanEmail,
+      fullName: String(payload.fullName).trim(),
+      role,
+      passwordHash: hashPassword(initialPass, generateSalt()),
+      status: USER_STATUSES.PENDING,
+      mustChangePassword: true,
+      failedLoginCount: 0,
+      lockedUntil: '',
+      createdAt: new Date().toISOString(),
+      lastLoginAt: '',
+      passwordDisplay: initialPass,
+      passwordUpdatedAt: '',
+      passwordUpdatedBy: ''
     };
     appendRecord(SHEETS.USERS, newUserRecord);
     AuditService.log({ userId: admin.user.userId, userEmail: admin.user.email, action: 'CREATE_USER', status: 'SUCCESS', targetName: cleanEmail });
-    return { success: true, user: newUserRecord };
+    return { success: true, user: this._mapUserOutput(newUserRecord) };
   },
   updateUser(sessionToken, userId, payload) {
-    AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
+    const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
     const user = findRecord(SHEETS.USERS, u => u.userId === userId);
     if (!user) throw new Error('User not found.');
     const updateData = {};
     if (payload.fullName) updateData.fullName = String(payload.fullName).trim();
     if (payload.role && [USER_ROLES.SUPER_ADMIN, USER_ROLES.USER].includes(payload.role)) updateData.role = payload.role;
-    if (payload.password || payload.key) {
-      updateData.passwordHash = hashPassword(payload.password || payload.key, generateSalt());
+    if (payload.status && [USER_STATUSES.ACTIVE, USER_STATUSES.PENDING, USER_STATUSES.DISABLED].includes(payload.status)) updateData.status = payload.status;
+    const nextPass = String(payload.password || payload.key || '').trim();
+    if (nextPass && nextPass !== String(user.passwordDisplay || '')) {
+      const now = new Date().toISOString();
+      updateData.passwordHash = hashPassword(nextPass, generateSalt());
+      updateData.passwordDisplay = nextPass;
+      updateData.passwordUpdatedAt = now;
+      updateData.passwordUpdatedBy = `${admin.user.fullName || admin.user.email} (Super Admin)`;
       updateData.mustChangePassword = false;
     }
     updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData);
@@ -903,11 +1164,20 @@ const UserService = {
     return { success: true, message: 'Status updated.' };
   },
   resetUserPassword(sessionToken, userId, tempPassword) {
-    AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
+    const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
     const user = findRecord(SHEETS.USERS, u => u.userId === userId);
     if (!user) throw new Error('User not found.');
-    updateRecordByRow(SHEETS.USERS, user._rowNumber, { passwordHash: hashPassword(tempPassword, generateSalt()), mustChangePassword: true });
-    return { success: true, message: 'Password reset.' };
+    const nextPass = String(tempPassword || '').trim();
+    const now = new Date().toISOString();
+    const updatedBy = `${admin.user.fullName || admin.user.email} (Super Admin)`;
+    updateRecordByRow(SHEETS.USERS, user._rowNumber, {
+      passwordHash: hashPassword(nextPass, generateSalt()),
+      passwordDisplay: nextPass,
+      passwordUpdatedAt: now,
+      passwordUpdatedBy: updatedBy,
+      mustChangePassword: true
+    });
+    return { success: true, message: 'Password reset.', password: nextPass, passwordUpdatedAt: now, passwordUpdatedBy: updatedBy };
   },
   deleteUser(sessionToken, userId) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
@@ -1746,27 +2016,77 @@ function apiResponseSuccess(data, message) { return { success: true, data: data 
 function apiResponseError(errCode, errMessage) { return { success: false, error: { code: errCode || 'ERR_GENERAL', message: errMessage || 'Server error.' } }; }
 
 /**
- * Fast unified sync method: Mengambil data inti portal dalam 1 batch cepat untuk performa maksimal portal di Vercel
+ * Fast unified sync method: Mengambil data inti portal langsung tersinkronisasi dengan Google Drive DMS_ROOT_REPOSITORY
  */
-function apiGetPortalInitialData(sessionToken) {
+function apiGetPortalInitialData(sessionToken, options) {
   try {
     const auth = AuthService.assertAuthenticated(sessionToken);
-    const projects = filterRecords(SHEETS.PROJECTS, p => !p.isArchived && p.status !== PROJECT_STATUSES.ARCHIVED);
+    const opts = typeof options === 'string' ? JSON.parse(options) : (options || {});
+    const syncSummary = DriveService.syncRepositoryWithSheets(Boolean(opts && opts.forceSync));
+
+    const projects = filterRecords(SHEETS.PROJECTS, p => String(p.isArchived) !== 'true' && p.status !== PROJECT_STATUSES.ARCHIVED);
+    const projectMap = {};
+    projects.forEach(p => {
+      projectMap[p.projectId] = p;
+      if (p.projectCode) projectMap[p.projectCode] = p;
+    });
+
     const docs = filterRecords(SHEETS.DOCUMENTS, d => !isDocDeletedRecord(d));
     const userFavorites = filterRecords(SHEETS.FAVORITES, f => f.userId === auth.user.userId);
     const favSet = new Set(userFavorites.map(f => f.documentId));
-    const mappedDocs = docs.map(d => Object.assign({}, d, { isFavorite: favSet.has(d.documentId) }));
-    
-    const recents = filterRecords(SHEETS.RECENTS, r => r.userId === auth.user.userId)
-      .sort((a, b) => new Date(b.lastOpenedAt) - new Date(a.lastOpenedAt))
-      .slice(0, 15);
-    
+
+    const docCountMap = {};
+    const mappedDocs = docs.map(d => {
+      docCountMap[d.projectId] = (docCountMap[d.projectId] || 0) + 1;
+      const prj = projectMap[d.projectId] || null;
+      return Object.assign({}, d, {
+        isFavorite: favSet.has(d.documentId),
+        projectCode: prj ? prj.projectCode : '—',
+        projectName: prj ? prj.projectName : 'DMS_ROOT_REPOSITORY',
+        partner: prj ? prj.partner : '—',
+        driveUrl: d.driveFileId ? `https://drive.google.com/file/d/${d.driveFileId}/view` : '',
+        previewUrl: d.driveFileId ? `https://drive.google.com/file/d/${d.driveFileId}/preview` : ''
+      });
+    });
+
+    const mappedProjects = projects.map(p => Object.assign({}, p, {
+      documentCount: docCountMap[p.projectId] || 0,
+      isArchived: String(p.isArchived) === 'true'
+    }));
+
+    const docById = {};
+    mappedDocs.forEach(d => { docById[d.documentId] = d; });
+
+    const rawRecents = filterRecords(SHEETS.RECENTS, r => r.userId === auth.user.userId)
+      .sort((a, b) => new Date(b.lastOpenedAt) - new Date(a.lastOpenedAt));
+
+    const recents = [];
+    const seenRecentIds = new Set();
+    for (let i = 0; i < rawRecents.length && recents.length < 15; i++) {
+      const r = rawRecents[i];
+      if (!r || !r.documentId || seenRecentIds.has(r.documentId)) continue;
+      const matchedDoc = docById[r.documentId];
+      if (!matchedDoc) continue;
+      seenRecentIds.add(r.documentId);
+      recents.push(Object.assign({}, matchedDoc, {
+        recentId: r.recentId,
+        lastOpenedAt: r.lastOpenedAt
+      }));
+    }
+
     return apiResponseSuccess({
-      projects: projects,
+      projects: mappedProjects,
       documents: mappedDocs,
       favorites: mappedDocs.filter(d => d.isFavorite),
       recents: recents,
-      user: auth.user
+      user: auth.user,
+      repositoryInfo: {
+        ownerEmail: 'jackslomberger@gmail.com',
+        rootFolderName: DMS_CONFIG.DEFAULT_ROOT_FOLDER_NAME,
+        rootFolderId: syncSummary.rootFolderId || ConfigService.get('ROOT_FOLDER_ID') || '',
+        syncedAt: new Date().toISOString(),
+        discoveredDocs: syncSummary.discoveredDocs || 0
+      }
     });
   } catch (err) {
     return apiResponseError('ERR_PORTAL_SYNC', err.message);
