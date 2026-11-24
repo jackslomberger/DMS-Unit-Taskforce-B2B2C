@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Unit Taskforce B2B2C DMS - Asuransi Jasindo</title>
   <!-- PDF.js for native client-side rendering of uploaded PDF documents -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -47,6 +47,7 @@
     html, body {
       width: 100%;
       height: 100%;
+      height: 100dvh;
       margin: 0;
       padding: 0;
       font-family: var(--font-sans);
@@ -56,9 +57,10 @@
       font-size: 13px;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
+      -webkit-text-size-adjust: 100%;
     }
 
-    #app-container { display: flex; height: 100%; width: 100%; overflow: hidden; }
+    #app-container { display: flex; height: 100%; height: 100dvh; width: 100%; overflow: hidden; }
 
     /* SLEEK MINIMAL SCROLLBAR */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -931,7 +933,7 @@
 
     .search-results-viewport { flex: 1; overflow-y: auto; padding: 1.5rem; }
     .search-grid-layout {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 1rem;
     }
     
     .search-item-card {
@@ -963,7 +965,7 @@
     }
 
     /* DATA TABLE */
-    .dms-table-wrap { width: 100%; overflow-x: auto; background-color: #FFFFFF; border-radius: 8px; border: 1px solid var(--slate-200); }
+    .dms-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; background-color: #FFFFFF; border-radius: 8px; border: 1px solid var(--slate-200); }
     .dms-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
     .dms-table th {
       background-color: var(--slate-100); color: var(--slate-600); font-weight: 600; text-transform: uppercase;
@@ -1055,45 +1057,103 @@
       border-radius: 4px; background: #FFFFFF; display: block;
     }
 
+    /* LOGIN OVERLAY RESPONSIVE SCROLL & SAFE AREA */
+    #login-overlay {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 1.25rem 1rem 4.5rem 1rem;
+      align-items: safe center;
+    }
+
+    .topbar-user-chip {
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
+      padding: 3px 6px; border-radius: 8px; transition: background 0.15s; flex-shrink: 0;
+    }
+    .topbar-user-chip:hover { background: var(--slate-100); }
+    .topbar-user-meta { display: flex; flex-direction: column; min-width: 0; }
+
+    @media (max-width: 1200px) {
+      .topbar { padding: 0 0.9rem; gap: 0.6rem; }
+      .topbar-center { max-width: 300px; }
+      #cloud-sync-text { display: none; }
+      .btn-turbo-sync { padding: 0 8px; gap: 4px; }
+    }
+
     @media (max-width: 1024px) {
       :root { --sidebar-width: 230px; }
-      .panel-categories { width: 220px; }
-      .panel-documents { width: 290px; }
+      .panel-categories { width: 210px; }
+      .panel-documents { width: 270px; }
       .copyright-author-line { font-size: 9.8px; gap: 4px; }
       .copyright-role-line { font-size: 8.5px; padding-left: 12px; }
       .sidebar-toggle-btn { font-size: 11px; padding: 5px 7px; }
       .quick-chip-btn { padding: 5px 10px; font-size: 11px; gap: 4px; }
       .quick-chip-btn.chip-upload { padding: 5px 12px; font-size: 11px; }
       .topbar-upload-btn { height: 31px; padding: 0 10px; font-size: 11px; }
+      .session-badge { display: none; }
+      .stat-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .upload-modal-card { max-width: 550px; max-height: min(90vh, 620px); max-height: min(90dvh, 620px); }
     }
 
     @media (max-width: 900px) {
       .dash-two-col { grid-template-columns: 1fr; }
-      .stat-card-grid { grid-template-columns: repeat(2, 1fr); }
-      .topbar-center { max-width: 280px; }
+      .stat-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar-center { max-width: 240px; }
+      .reader-drawer {
+        position: absolute; top: 0; right: 0; bottom: 0; z-index: 25;
+        width: min(320px, 88vw); box-shadow: -8px 0 28px rgba(0, 0, 0, 0.55);
+      }
+      .reader-drawer.hidden { width: 0; box-shadow: none; }
     }
 
     @media (max-width: 768px) {
       #app-container { position: relative; }
-      .mobile-menu-btn { display: inline-flex; }
+      .mobile-menu-btn { display: inline-flex; flex-shrink: 0; min-width: 36px; height: 34px; }
       .sidebar-backdrop.active { display: block; }
       .sidebar {
-        position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000; width: 270px;
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 1000;
+        width: min(275px, 84vw);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
         transform: translateX(-100%); box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4);
         transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       }
+      .sidebar.collapsed { width: min(275px, 84vw); }
+      .sidebar.collapsed .sidebar-brand-text,
+      .sidebar.collapsed .nav-label,
+      .sidebar.collapsed .nav-section-title { display: flex; }
+      .sidebar.collapsed .nav-section-title { display: block; }
       .sidebar.mobile-open { transform: translateX(0); }
-      .topbar { padding: 0 0.75rem; gap: 0.5rem; }
-      .page-heading { font-size: 13px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .topbar-center { flex: 1; max-width: none; }
+      .sidebar-toggle-btn { display: none; }
+
+      .topbar {
+        height: auto; min-height: var(--topbar-height);
+        padding: 0.45rem 0.75rem; gap: 0.45rem; flex-wrap: wrap;
+      }
+      .topbar-left { gap: 0.5rem; min-width: 0; flex: 1 1 auto; }
+      .page-heading {
+        font-size: 13.5px; max-width: 170px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .topbar-right { gap: 0.4rem; flex-shrink: 0; }
+      .topbar-user-meta { display: none; }
+      .topbar-user-chip { padding: 2px; }
+      #btn-portal-fullscreen { display: none; }
+      .topbar-center {
+        order: 3; flex: 1 0 100%; max-width: 100%; width: 100%;
+      }
+      .quick-search-input { height: 34px; padding: 0 12px 0 32px; font-size: 12.5px; }
       .quick-search-shortcut { display: none; }
       .session-badge { display: none; }
-      .dashboard-view { padding: 1rem; gap: 1rem; }
+
+      .dashboard-view { padding: 0.85rem; gap: 0.9rem; }
+      .view-content-wrapper { padding: 0.85rem; gap: 0.85rem; }
+      .search-filter-card { padding: 0.85rem; }
+      .search-results-meta { padding: 0.65rem 0.85rem; flex-wrap: wrap; gap: 0.5rem; }
+      .search-results-viewport { padding: 0.85rem; }
+
       .quick-action-strip {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.5rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.45rem;
         width: 100%;
       }
       .quick-chip-btn {
@@ -1110,22 +1170,45 @@
         min-height: 38px;
         font-size: 12px;
       }
-      .stat-card-grid { grid-template-columns: 1fr; gap: 0.75rem; }
-      .explorer-container { flex-direction: column; overflow-y: auto; }
+
+      .stat-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+      .stat-card { padding: 0.9rem; gap: 0.7rem; }
+      .stat-icon-box { width: 38px; height: 38px; font-size: 17px; }
+      .stat-val { font-size: 20px; }
+      .stat-label { font-size: 10px; }
+
+      .dash-panel-header { padding: 0.7rem 0.85rem; flex-wrap: wrap; gap: 0.5rem; }
+      .recents-item-row { flex-wrap: wrap; gap: 0.6rem; padding: 0.75rem; }
+
+      .explorer-container { flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       .panel-categories, .panel-documents, .panel-inspector {
         width: 100% !important; max-width: 100% !important; border-right: none;
-        border-bottom: 1px solid var(--slate-200);
+        border-bottom: 1px solid var(--slate-200); flex-shrink: 0;
       }
-      .panel-categories { max-height: 180px; }
-      .panel-documents { max-height: 280px; }
+      .panel-categories { max-height: 200px; }
+      .panel-documents { max-height: 300px; }
+      .panel-inspector { overflow: visible; }
+      .inspector-header { padding: 0.75rem 0.9rem; flex-wrap: wrap; gap: 0.6rem; }
+      .inspector-body { padding: 0.9rem; overflow: visible; }
+      .metadata-grid { grid-template-columns: 1fr; padding: 0.9rem; gap: 0.75rem; }
+
       .filter-controls-row { grid-template-columns: 1fr 1fr; }
-      .modal-card { width: 95vw; max-height: 94vh; max-height: 94dvh; padding: 0; border-radius: 8px; }
+      .modal-overlay { padding: 0.6rem; }
+      .modal-card { width: 96vw; max-width: 96vw; max-height: 94vh; max-height: 94dvh; padding: 0; border-radius: 10px; }
+      .reader-topbar { height: auto; min-height: 52px; padding: 0.5rem 0.65rem; flex-wrap: wrap; gap: 0.45rem; }
+      .reader-topbar-left { max-width: 100%; flex: 1 1 200px; }
+      .reader-toolbar { order: 3; width: 100%; justify-content: center; overflow-x: auto; }
+      .reader-content-wrapper { padding: 0.75rem; }
+      .reader-pdf-container { height: 74dvh; }
       .reader-office-card { width: 100% !important; border-radius: 6px; }
+      .office-card-header { padding: 1rem; flex-direction: column; gap: 0.5rem; }
+      .office-card-body { padding: 1.1rem; max-height: none; }
+      .office-card-footer { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 0.5rem; }
 
       .topbar-upload-btn { height: 30px; padding: 0 9px; font-size: 11px; }
       .upload-modal-card {
-        width: 95vw;
-        max-width: 95vw;
+        width: 96vw;
+        max-width: 96vw;
         max-height: 92vh;
         max-height: 92dvh;
       }
@@ -1139,13 +1222,18 @@
         font-size: 11.5px;
         min-width: 125px;
       }
+      #toast-container {
+        left: 0.75rem; right: 0.75rem; bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
+      }
+      .toast { min-width: 0; width: 100%; }
     }
 
     @media (max-width: 480px) {
-      .page-heading { display: none; }
+      .page-heading { max-width: 125px; font-size: 12.5px; }
+      .btn-logout { padding: 4px 7px; font-size: 10.5px; }
       .filter-controls-row { grid-template-columns: 1fr; }
       .quick-action-strip {
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.4rem;
       }
       .quick-chip-btn {
@@ -1160,11 +1248,16 @@
         padding: 8px 12px;
         min-height: 36px;
       }
+      .stat-card { padding: 0.75rem; gap: 0.55rem; }
+      .stat-icon-box { width: 34px; height: 34px; font-size: 16px; border-radius: 8px; }
+      .stat-val { font-size: 18px; }
+      .dms-table th, .dms-table td { padding: 8px 10px; font-size: 11.5px; }
       .topbar-upload-btn {
         height: 29px;
         padding: 0 8px;
         font-size: 10.5px;
       }
+      #login-form { padding: 1.25rem !important; }
       .upload-modal-card {
         width: 96vw;
         max-width: 96vw;
@@ -1192,6 +1285,11 @@
         flex: 1;
         min-width: 0;
       }
+    }
+
+    @media (max-width: 380px) {
+      .stat-card-grid { grid-template-columns: 1fr; }
+      .page-heading { display: none; }
     }
 
     /* GOOGLE DRIVE ACCELERATOR & TURBO SYNC STYLES */
@@ -1413,9 +1511,9 @@
             <span id="session-timer-text">Active (60m)</span>
           </div>
 
-          <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 3px 6px; border-radius: 8px; transition: background 0.15s;" onclick="navigateTo('USERS')" title="Buka User Management / Kelola Akun & Password" onmouseover="this.style.background='var(--slate-100)'" onmouseout="this.style.background='transparent'">
+          <div class="topbar-user-chip" onclick="navigateTo('USERS')" title="Buka User Management / Kelola Akun & Password">
             <div class="avatar-circle" id="user-avatar">SA</div>
-            <div style="display: flex; flex-direction: column;">
+            <div class="topbar-user-meta">
               <span class="user-name" id="user-name-display">Administrator</span>
               <span class="role-badge super-admin" id="user-role-badge">SUPER_ADMIN</span>
             </div>
@@ -2668,6 +2766,55 @@
           localStorage.setItem('dms_mock_users', JSON.stringify(this._mockUsers));
         } catch (e) {}
       },
+      _mergeLiveUsersFromSheet(remoteUsers, caller) {
+        if (!Array.isArray(remoteUsers) || remoteUsers.length === 0) return [];
+        this._loadMockUsers();
+        const isSuperAdmin = caller && caller.role === 'SUPER_ADMIN';
+        const callerEmail = String((caller && caller.email) || '').toLowerCase();
+        const normalizedRemote = [];
+
+        remoteUsers.forEach(ru => {
+          if (!ru || !ru.email) return;
+          const ruEmail = String(ru.email).trim().toLowerCase();
+          if (caller && !isSuperAdmin && ru.userId !== caller.userId && ruEmail !== callerEmail) {
+            return;
+          }
+          const copy = this._normalizeUserRecord(Object.assign({}, ru, { email: ruEmail }));
+          normalizedRemote.push(copy);
+
+          const existing = this._mockUsers.find(u =>
+            u.userId === copy.userId || (u.email && u.email.toLowerCase() === ruEmail)
+          );
+          if (existing) {
+            Object.assign(existing, copy);
+          } else {
+            this._mockUsers.push(Object.assign({}, copy));
+          }
+        });
+
+        this._saveMockUsers();
+        return normalizedRemote;
+      },
+      _syncSingleUserFromSheet(sheetUser, fallbackPassword) {
+        if (!sheetUser || (!sheetUser.email && !sheetUser.userId)) return null;
+        this._loadMockUsers();
+        const targetEmail = String(sheetUser.email || '').trim().toLowerCase();
+        let existing = this._mockUsers.find(u =>
+          (sheetUser.userId && u.userId === sheetUser.userId) ||
+          (targetEmail && u.email && u.email.toLowerCase() === targetEmail)
+        );
+        const merged = Object.assign({}, existing || {}, sheetUser);
+        if (targetEmail) merged.email = targetEmail;
+        if (fallbackPassword) merged.password = String(fallbackPassword).trim();
+        this._normalizeUserRecord(merged);
+        if (existing) {
+          Object.assign(existing, merged);
+        } else {
+          this._mockUsers.unshift(merged);
+        }
+        this._saveMockUsers();
+        return Object.assign({}, merged);
+      },
       _loadMockConfigs() {
         try {
           const raw = localStorage.getItem('dms_mock_configs');
@@ -3030,15 +3177,9 @@
           'apiUpdateDocumentMetadata'
         ];
 
-        // Ultra-fast local-first + background cloud-sync methods for User Management & System Settings (0ms UX + strict RBAC)
+        // System Settings stays 0ms local-first + background sync;
+        // ALL user authentication & password operations sync DIRECTLY with Google Sheet "DMS Unit Taskforce B2B2C" across all devices!
         const FAST_LOCAL_SYNC_METHODS = [
-          'apiGetUsers',
-          'apiCreateUser',
-          'apiUpdateUser',
-          'apiSetUserStatus',
-          'apiResetUserPassword',
-          'apiDeleteUser',
-          'apiChangePassword',
           'apiGetSystemConfigs',
           'apiUpdateSystemConfigs'
         ];
@@ -3081,7 +3222,7 @@
           // 2. Lingkungan Vercel / GitHub / Local Web App
           const remoteUrl = getGoogleDriveEndpointUrl();
 
-          // INSTANT ZERO-LATENCY SIGN TO PORTAL (< 10ms) WITH STRICT PASSWORD VALIDATION
+          // LIVE CROSS-DEVICE LOGIN DIRECTLY AGAINST GOOGLE SHEET "DMS Unit Taskforce B2B2C"
           if (methodName === 'apiLogin') {
             this._loadMockUsers();
             const creds = typeof args[0] === 'string' ? JSON.parse(args[0]) : (args[0] || {});
@@ -3095,12 +3236,54 @@
               return reject(new Error('Password wajib diisi.'));
             }
 
+            // First: authenticate directly against live Google Sheet database (DMS Unit Taskforce B2B2C)
+            if (remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
+              const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+              const timer = controller ? setTimeout(() => controller.abort(), 18000) : null;
+              try {
+                const resp = await fetch(remoteUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                  body: JSON.stringify({
+                    action: 'apiLogin',
+                    args: [JSON.stringify({ email: inputEmail, password: inputPassword, userAgent: navigator.userAgent })]
+                  }),
+                  redirect: 'follow',
+                  signal: controller ? controller.signal : undefined
+                });
+                if (timer) clearTimeout(timer);
+                if (resp.ok) {
+                  const resData = await resp.json();
+                  if (resData && resData.success === false) {
+                    const errMsg = resData.error ? (resData.error.message || resData.error) : 'Password atau email Anda salah.';
+                    // Authoritative rejection from DMS Unit Taskforce B2B2C sheet — NEVER fall back to stale localStorage password!
+                    return reject(new Error(errMsg));
+                  }
+                  if (resData && resData.success === true && resData.data && resData.data.user) {
+                    const livePayload = resData.data;
+                    const syncedUser = this._syncSingleUserFromSheet(livePayload.user, inputPassword);
+                    return wrappedResolve({
+                      sessionToken: livePayload.sessionToken,
+                      spreadsheetName: livePayload.spreadsheetName || 'DMS Unit Taskforce B2B2C',
+                      user: Object.assign({}, livePayload.user, {
+                        passwordStatus: (syncedUser && syncedUser.passwordStatus) || livePayload.user.passwordStatus || 'EXISTING',
+                        passwordUpdatedAt: (syncedUser && syncedUser.passwordUpdatedAt) || livePayload.user.passwordUpdatedAt || ''
+                      })
+                    });
+                  }
+                }
+              } catch (netErr) {
+                if (timer) clearTimeout(timer);
+                console.warn('Live Google Sheet login unreachable, evaluating offline fallback:', netErr);
+              }
+            }
+
+            // Offline fallback ONLY when Google Apps Script / internet is unreachable
             let user = this._mockUsers.find(u =>
               (u.email || '').toLowerCase() === inputEmail ||
               (u.userId || '').toLowerCase() === inputEmail
             );
 
-            // Convenient alias matching for known corporate shortnames
             if (!user) {
               if (inputEmail === 'admin' || inputEmail === 'superadmin') {
                 user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'admin@asuransijasindo.co.id');
@@ -3114,24 +3297,17 @@
             if (!user) {
               return reject(new Error('Email anda salah. Akun tidak terdaftar, silakan hubungi Super Admin.'));
             }
-
             if (user.status === 'DISABLED') {
               return reject(new Error('Akun Anda dinonaktifkan. Silakan hubungi Administrator.'));
             }
 
             const expectedPassword = String(user.password || 'AdminPassword2026!').trim();
             const hasUpdatedPassword = Boolean(user.passwordUpdatedAt) || user.passwordStatus === 'UPDATED';
-            // Once a user's password has been updated, ONLY the updated password is accepted.
-            // If still on initial/existing default password, accept exact existing password (or legacy corporate default 'tfb2b2c' for seeded SUPER_ADMINs).
             const isLegacySeedAdminKey = !hasUpdatedPassword && user.role === 'SUPER_ADMIN' && inputPassword === 'tfb2b2c';
             const isPassValid = (inputPassword === expectedPassword) || isLegacySeedAdminKey;
 
             if (!isPassValid) {
-              return reject(new Error('Password anda salah. Silakan periksa kembali password Anda.'));
-            }
-
-            if (isLegacySeedAdminKey && user.password !== 'tfb2b2c') {
-              user.password = expectedPassword;
+              return reject(new Error('Password anda salah. Silakan periksa kembali password terbaru Anda.'));
             }
 
             user.lastLoginAt = new Date().toISOString();
@@ -3140,21 +3316,6 @@
             }
             this._saveMockUsers();
 
-            this._mockAuditLogs.unshift({
-              activityId: 'LOG-' + Date.now().toString(16).toUpperCase(),
-              timestamp: new Date().toISOString(),
-              userId: user.userId,
-              userEmail: user.email,
-              userName: user.fullName,
-              role: user.role,
-              action: 'LOGIN',
-              targetType: 'USER',
-              targetName: user.email,
-              details: 'User authenticated via Web Portal (Jasindo TF B2B2C DMS)',
-              status: 'SUCCESS'
-            });
-
-            // Encode userId in fast session token so Code.gs strictly verifies real user & role
             const sessionPayload = {
               sessionToken: `DMS_SES_LOCAL__${user.userId}__${Date.now().toString(16).toUpperCase()}`,
               user: {
@@ -3167,13 +3328,10 @@
                 passwordUpdatedAt: user.passwordUpdatedAt || ''
               }
             };
-
-            // Silent background sync with remote Google Apps Script if connected
-            this._syncRemoteBackground('apiLogin', args);
             return wrappedResolve(sessionPayload);
           }
 
-          // Skip blocking remote fetch for FAST_LOCAL_SYNC_METHODS — execute locally in 0ms and sync remote in background!
+          // Direct live Google Sheet / Drive backend call for all non-local-fast methods (including ALL password & user management calls)
           if (!FAST_LOCAL_SYNC_METHODS.includes(methodName) && remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
             try {
               const resp = await fetch(remoteUrl, {
@@ -3185,10 +3343,10 @@
               if (resp.ok) {
                 const resData = await resp.json();
                 if (resData && resData.success === false) {
-                  return reject(new Error(resData.error ? (resData.error.message || resData.error) : 'Google Drive backend error'));
+                  return reject(new Error(resData.error ? (resData.error.message || resData.error) : 'Google Drive / Sheet backend error'));
                 } else if (resData && (resData.success === true || resData.data !== undefined)) {
                   const finalVal = resData.data !== undefined ? resData.data : resData;
-                  // Keep live in-memory repository synced with Google Drive DMS_ROOT_REPOSITORY
+                  // Keep live in-memory repository synced with Google Drive DMS_ROOT_REPOSITORY & Sheet DMS Unit Taskforce B2B2C
                   if (methodName === 'apiGetPortalInitialData' && finalVal) {
                     const hydrated = this._hydrateFromLiveData(finalVal);
                     return wrappedResolve(hydrated);
@@ -3201,14 +3359,71 @@
                       const hydrated = this._hydrateFromLiveData({ documents: finalVal });
                       return wrappedResolve(hydrated.documents);
                     }
+                  } else if (methodName === 'apiGetUsers' && Array.isArray(finalVal)) {
+                    const synced = this._mergeLiveUsersFromSheet(finalVal, AppState.currentUser);
+                    return wrappedResolve(synced);
+                  } else if (methodName === 'apiChangePassword' && finalVal) {
+                    const parsedArg = typeof args[0] === 'string' ? JSON.parse(args[0] || '{}') : (args[0] || {});
+                    const updatedRec = this._syncSingleUserFromSheet({
+                      userId: finalVal.userId || (AppState.currentUser && AppState.currentUser.userId),
+                      email: finalVal.email || parsedArg.email || (AppState.currentUser && AppState.currentUser.email),
+                      fullName: finalVal.fullName || (AppState.currentUser && AppState.currentUser.fullName),
+                      password: finalVal.password || parsedArg.newPassword,
+                      passwordStatus: 'UPDATED',
+                      passwordUpdatedAt: finalVal.passwordUpdatedAt || new Date().toISOString(),
+                      passwordUpdatedBy: finalVal.passwordUpdatedBy || `${(AppState.currentUser && (AppState.currentUser.fullName || AppState.currentUser.email)) || 'User'} (Self)`,
+                      mustChangePassword: false,
+                      status: 'ACTIVE'
+                    }, finalVal.password || parsedArg.newPassword);
+                    if (AppState.currentUser && updatedRec) {
+                      AppState.currentUser.mustChangePassword = false;
+                      AppState.currentUser.passwordStatus = 'UPDATED';
+                      AppState.currentUser.passwordUpdatedAt = updatedRec.passwordUpdatedAt;
+                      try {
+                        sessionStorage.setItem('dms_user', JSON.stringify(AppState.currentUser));
+                        localStorage.setItem('dms_user', JSON.stringify(AppState.currentUser));
+                        notifyParentAuthState(AppState.currentUser);
+                      } catch (e) {}
+                    }
+                    return wrappedResolve(finalVal);
+                  } else if ((methodName === 'apiUpdateUser' || methodName === 'apiResetUserPassword' || methodName === 'apiCreateUser') && finalVal) {
+                    if (finalVal.user) {
+                      const syncedU = this._syncSingleUserFromSheet(finalVal.user, finalVal.password || finalVal.user.password);
+                      if (syncedU) finalVal.user = syncedU;
+                    } else if (methodName === 'apiResetUserPassword') {
+                      const syncedU = this._syncSingleUserFromSheet({
+                        userId: args[1],
+                        email: args[3] || '',
+                        password: finalVal.password || args[2],
+                        passwordStatus: 'UPDATED',
+                        passwordUpdatedAt: finalVal.passwordUpdatedAt || new Date().toISOString(),
+                        passwordUpdatedBy: finalVal.passwordUpdatedBy || ''
+                      }, finalVal.password || args[2]);
+                      if (syncedU) finalVal.user = syncedU;
+                    }
+                    return wrappedResolve(finalVal);
+                  } else if (methodName === 'apiDeleteUser') {
+                    const delUserId = args[1];
+                    this._mockUsers = this._mockUsers.filter(u => u.userId !== delUserId);
+                    this._saveMockUsers();
+                    return wrappedResolve(finalVal);
+                  } else if (methodName === 'apiSetUserStatus') {
+                    const u = this._mockUsers.find(x => x.userId === args[1]);
+                    if (u) { u.status = args[2]; this._saveMockUsers(); }
+                    return wrappedResolve(finalVal);
                   }
                   return wrappedResolve(finalVal);
                 }
+              } else if (['apiChangePassword', 'apiResetUserPassword', 'apiUpdateUser', 'apiCreateUser', 'apiDeleteUser', 'apiSetUserStatus'].includes(methodName)) {
+                throw new Error(`HTTP ${resp.status} dari endpoint Apps Script`);
               }
             } catch (netErr) {
               console.warn('Apps Script Web App API request failed, evaluating fallback:', netErr);
               if (methodName === 'apiUploadDocument') {
                 return reject(new Error(`Gagal menyimpan ke Google Drive: ${netErr.message}. Pastikan Web App Apps Script di-deploy dengan opsi 'Who has access: Anyone'.`));
+              }
+              if (['apiChangePassword', 'apiResetUserPassword', 'apiUpdateUser', 'apiCreateUser', 'apiDeleteUser', 'apiSetUserStatus'].includes(methodName)) {
+                return reject(new Error(`Gagal terhubung ke database Google Sheet DMS Unit Taskforce B2B2C (${netErr.message}). Perubahan tidak disimpan agar sinkronisasi antar perangkat tetap terjaga.`));
               }
             }
           }
@@ -4202,7 +4417,7 @@
         }
 
         const loginCall = ServerApi.call('apiLogin', JSON.stringify({ email, password }));
-        const timeoutCall = new Promise((_, rej) => setTimeout(() => rej(new Error('Koneksi validasi timeout. Silakan periksa kredensial dan coba lagi.')), 6000));
+        const timeoutCall = new Promise((_, rej) => setTimeout(() => rej(new Error('Koneksi validasi ke database DMS Unit Taskforce B2B2C timeout. Silakan coba lagi.')), 20000));
         const res = await Promise.race([loginCall, timeoutCall]);
 
         AppState.sessionToken = res.sessionToken;
@@ -6696,14 +6911,14 @@ ${440 + streamLen}
               <div class="stat-icon-box" style="background-color: #EFF6FF; color: var(--navy-600);">📁</div>
               <div>
                 <div class="stat-val" id="dash-stat-projects">—</div>
-                <div class="stat-label">Active Projects (Drive)</div>
+                <div class="stat-label">Active Project</div>
               </div>
             </div>
             <div class="stat-card" onclick="navigateTo('SEARCH')">
               <div class="stat-icon-box" style="background-color: #ECFDF5; color: var(--emerald-600);">📄</div>
               <div>
                 <div class="stat-val" id="dash-stat-docs">—</div>
-                <div class="stat-label">Documents in DMS_ROOT_REPOSITORY</div>
+                <div class="stat-label">Documents</div>
               </div>
             </div>
             <div class="stat-card" onclick="AppState.search.expiration = 'EXPIRING_30'; navigateTo('SEARCH');">
@@ -6724,21 +6939,6 @@ ${440 + streamLen}
 
           <!-- LIVE GOOGLE DRIVE DOCUMENTS TABLE PANEL (DMS_ROOT_REPOSITORY) -->
           <div class="dash-panel-card" style="margin-bottom: 0;">
-            <div class="dash-panel-header" style="flex-wrap: wrap; gap: 0.75rem;">
-              <span class="dash-panel-title">
-                <span>📂</span>
-                <span>Dokumen Google Drive — DMS_ROOT_REPOSITORY (jackslomberger@gmail.com)</span>
-              </span>
-              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                <input type="text" id="dash-repo-search-input" class="input-field" value="${escapeHtml(window._dashRepoFilter.query || '')}" placeholder="Filter nama dokumen..." oninput="handleDashboardRepoFilterChange()" style="height: 28px; font-size: 11px; width: 190px; padding: 0 8px;">
-                <select id="dash-repo-project-filter" class="select-field" onchange="handleDashboardRepoFilterChange()" style="height: 28px; font-size: 11px; width: 200px;">
-                  <option value="ALL">Semua Project (Google Drive)</option>
-                </select>
-                <button type="button" class="btn-secondary" style="height: 28px; font-size: 11px; padding: 0 9px;" onclick="navigateTo('EXPLORER')">
-                  Buka Explorer
-                </button>
-              </div>
-            </div>
             <div id="dash-gdrive-docs-container" style="padding: 0.5rem;">
               <div style="text-align: center; color: var(--slate-500); padding: 2rem;">
                 <div class="spinner" style="border-top-color: var(--navy-600); margin: 0 auto 0.5rem;"></div>
@@ -6843,14 +7043,7 @@ ${440 + streamLen}
       if (expEl) expEl.innerText = expiringDocs.length;
       if (fEl) fEl.innerText = favs.length;
 
-      // Populate Project filter dropdown on Dashboard
-      const prjFilterEl = document.getElementById('dash-repo-project-filter');
-      if (prjFilterEl) {
-        const prevSelected = window._dashRepoFilter.projectId || 'ALL';
-        prjFilterEl.innerHTML = `<option value="ALL">Semua Project (${projects.length})</option>` +
-          projects.map(p => `<option value="${escapeHtml(p.projectId)}" ${prevSelected === p.projectId ? 'selected' : ''}>[${escapeHtml(p.projectCode)}] ${escapeHtml(p.projectName)}</option>`).join('');
-      }
-
+      window._dashRepoFilter = { projectId: 'ALL', query: '' };
       renderDashboardDriveDocumentsPanel();
       renderDashboardExpiringPanel(expiringDocs, today);
       renderDashboardRecentsPanel(recList);
@@ -9414,8 +9607,9 @@ ${440 + streamLen}
           showToast(`User '${email}' berhasil dibuat dengan password aktif.`, 'success');
         } else {
           // EDIT
+          const email = (document.getElementById('user-form-email')?.value || '').trim();
           const status = document.getElementById('user-form-status').value;
-          const updatePayload = { fullName, role, status };
+          const updatePayload = { email, fullName, role, status };
           if (keyOrPassword) {
             updatePayload.password = keyOrPassword;
             updatePayload.key = keyOrPassword;
@@ -9432,7 +9626,7 @@ ${440 + streamLen}
             };
             AppState.users.revealedPasswordIds[res.user.userId] = true;
           }
-          showToast((res && res.message) || 'User account & validasi key login berhasil diperbarui.', 'success');
+          showToast((res && res.message) || 'Akun & password berhasil diperbarui langsung ke Google Sheet DMS Unit Taskforce B2B2C.', 'success');
         }
         closeUserModal();
         loadUsersList(false);
@@ -9478,12 +9672,14 @@ ${440 + streamLen}
         return;
       }
       const userId = document.getElementById('reset-user-id').value;
+      const targetUser = (AppState.users.list || []).find(u => u.userId === userId);
+      const targetEmail = targetUser ? targetUser.email : '';
       const tempPassword = document.getElementById('reset-new-password').value.trim();
       const btn = document.getElementById('btn-reset-submit');
       btn.disabled = true;
 
       try {
-        const res = await ServerApi.call('apiResetUserPassword', AppState.sessionToken, userId, tempPassword);
+        const res = await ServerApi.call('apiResetUserPassword', AppState.sessionToken, userId, tempPassword, targetEmail);
         if (res && res.user) {
           AppState.users.lastPasswordChange = {
             userId: res.user.userId,
@@ -9495,7 +9691,7 @@ ${440 + streamLen}
           };
           AppState.users.revealedPasswordIds[res.user.userId] = true;
         }
-        showToast('Password baru berhasil diperbarui & langsung ditampilkan pada User Management.', 'success');
+        showToast((res && res.message) || 'Password baru berhasil disimpan langsung ke Google Sheet DMS Unit Taskforce B2B2C.', 'success');
         closeResetPasswordModal();
         loadUsersList(false);
       } catch (err) {
@@ -9606,6 +9802,7 @@ ${440 + streamLen}
       try {
         const res = await ServerApi.call('apiChangePassword', JSON.stringify({
           sessionToken: AppState.sessionToken,
+          email: AppState.currentUser ? AppState.currentUser.email : '',
           currentPassword: curPass,
           newPassword: newPass
         }));
@@ -9621,7 +9818,7 @@ ${440 + streamLen}
         AppState.users.revealedPasswordIds[AppState.users.lastPasswordChange.userId] = true;
 
         closeChangePasswordModal();
-        showToast(res.message || 'Password berhasil diperbarui!', 'success');
+        showToast(res.message || 'Password berhasil diperbarui & tersimpan di Google Sheet DMS Unit Taskforce B2B2C!', 'success');
 
         if (AppState.currentRoute === 'USERS') {
           const canvas = document.getElementById('workspace-canvas');

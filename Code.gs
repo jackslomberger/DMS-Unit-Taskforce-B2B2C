@@ -12,8 +12,9 @@
 
 const DMS_CONFIG = {
   APP_NAME: 'Document Management System',
-  APP_VERSION: '1.11.0-production',
+  APP_VERSION: '1.12.0-production',
   TARGET_DRIVE_ACCOUNT: 'jackslomberger@gmail.com',
+  DATABASE_SPREADSHEET_NAME: 'DMS Unit Taskforce B2B2C',
   DEFAULT_ROOT_FOLDER_NAME: 'DMS_ROOT_REPOSITORY',
   DEFAULT_SESSION_TIMEOUT_MINUTES: 60,
   DEFAULT_TRASH_RETENTION_DAYS: 30,
@@ -197,7 +198,23 @@ function getDatabaseSpreadsheet() {
     props.setProperty('DMS_SPREADSHEET_ID', active.getId());
     return active;
   }
-  throw new Error('Database Error: No active spreadsheet or DMS_SPREADSHEET_ID found.');
+  // Auto-discover Google Sheet database by exact name ("DMS Unit Taskforce B2B2C")
+  const candidateNames = [
+    DMS_CONFIG.DATABASE_SPREADSHEET_NAME || 'DMS Unit Taskforce B2B2C',
+    'DMS_DATABASE_MASTER'
+  ];
+  for (let i = 0; i < candidateNames.length; i++) {
+    try {
+      const files = DriveApp.getFilesByName(candidateNames[i]);
+      if (files.hasNext()) {
+        const ssFile = files.next();
+        const ss = SpreadsheetApp.openById(ssFile.getId());
+        props.setProperty('DMS_SPREADSHEET_ID', ss.getId());
+        return ss;
+      }
+    } catch (e) {}
+  }
+  throw new Error('Database Error: File Google Sheet "DMS Unit Taskforce B2B2C" tidak ditemukan. Pastikan DMS_SPREADSHEET_ID terkonfigurasi atau file sheet tersedia di Google Drive.');
 }
 
 function getDbSheet(sheetName) {
@@ -825,29 +842,44 @@ const AuditService = {
 // ============================================================================
 
 const AuthService = {
+  _resolveLoginIdentifier(rawIdentifier) {
+    const clean = String(rawIdentifier || '').trim().toLowerCase();
+    if (clean === 'admin' || clean === 'superadmin') return 'admin@asuransijasindo.co.id';
+    if (clean === 'jack') return 'jackslomberger@gmail.com';
+    if (clean === 'imam') return 'imam02778@asuransijasindo.co.id';
+    return clean;
+  },
+
   authenticate(email, password, userAgent) {
     if (!email || !password) throw new Error('Email and password must be provided.');
-    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanEmail = this._resolveLoginIdentifier(email);
     const cleanPass = String(password).trim();
-    let user = findRecord(SHEETS.USERS, u => String(u.email).toLowerCase() === cleanEmail);
+
+    // Always read fresh USERS table from Google Sheet DMS Unit Taskforce B2B2C so password updates on other devices apply immediately
+    invalidateSheetCache(SHEETS.USERS);
+    let user = findRecord(SHEETS.USERS, u =>
+      String(u.email || '').trim().toLowerCase() === cleanEmail ||
+      String(u.userId || '').trim().toLowerCase() === cleanEmail
+    );
     const now = new Date();
-    
+
     // Auto-bootstrap Corporate Super Admins if not yet present in SHEETS.USERS
-    const corporateAdmins = [
-      'jackslomberger@gmail.com',
-      'admin@jasindo.co.id',
-      'admin@asuransijasindo.co.id',
-      'email@asuransijasindo.co.id',
-      'imam02778@asuransijasindo.co.id',
-      'admin@enterprise.com'
-    ];
-    if (!user && corporateAdmins.includes(cleanEmail)) {
+    const corporateAdmins = {
+      'jackslomberger@gmail.com': { userId: 'USR-JACK', fullName: 'Jack Slomberger (Super Admin)' },
+      'admin@jasindo.co.id': { userId: 'USR-ADMIN-ALIAS', fullName: 'Primary Administrator' },
+      'admin@asuransijasindo.co.id': { userId: 'USR-ADMIN', fullName: 'Primary Administrator' },
+      'email@asuransijasindo.co.id': { userId: 'USR-DEFAULT', fullName: 'Corporate Officer' },
+      'imam02778@asuransijasindo.co.id': { userId: 'USR-001-IA', fullName: 'Imam Ashyri' },
+      'admin@enterprise.com': { userId: 'USR-ADMIN-LEGACY', fullName: 'System Administrator' }
+    };
+    if (!user && corporateAdmins[cleanEmail]) {
+      const admMeta = corporateAdmins[cleanEmail];
       const defaultSalt = generateSalt();
       const defaultHash = hashPassword('AdminPassword2026!', defaultSalt);
       const newAdminRecord = {
-        userId: cleanEmail === 'jackslomberger@gmail.com' ? 'USR-JACK' : (cleanEmail === 'admin@jasindo.co.id' ? 'USR-ADMIN-ALIAS' : (cleanEmail === 'email@asuransijasindo.co.id' ? 'USR-DEFAULT' : 'USR-ADMIN')),
+        userId: admMeta.userId,
         email: cleanEmail,
-        fullName: cleanEmail === 'jackslomberger@gmail.com' ? 'Jack Slomberger (Super Admin)' : (cleanEmail === 'imam02778@asuransijasindo.co.id' ? 'Imam Ashyri' : 'Primary Administrator'),
+        fullName: admMeta.fullName,
         role: USER_ROLES.SUPER_ADMIN,
         passwordHash: defaultHash,
         status: USER_STATUSES.ACTIVE,
@@ -855,27 +887,34 @@ const AuthService = {
         failedLoginCount: 0,
         lockedUntil: '',
         createdAt: now.toISOString(),
-        lastLoginAt: now.toISOString()
+        lastLoginAt: now.toISOString(),
+        passwordDisplay: 'AdminPassword2026!',
+        passwordUpdatedAt: '',
+        passwordUpdatedBy: ''
       };
       appendRecord(SHEETS.USERS, newAdminRecord);
-      user = findRecord(SHEETS.USERS, u => String(u.email).toLowerCase() === cleanEmail);
+      user = findRecord(SHEETS.USERS, u => String(u.email || '').trim().toLowerCase() === cleanEmail);
     }
 
     if (!user) {
       AuditService.log({ userEmail: cleanEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_USER_NOT_FOUND', userAgent });
-      throw new Error('Email anda salah');
+      throw new Error('Email anda salah. Akun tidak terdaftar pada database DMS Unit Taskforce B2B2C.');
     }
+    const resolvedEmail = String(user.email || cleanEmail).trim().toLowerCase();
     if (user.status === USER_STATUSES.DISABLED) {
-      AuditService.log({ userId: user.userId, userEmail: cleanEmail, action: 'LOGIN_BLOCKED', status: 'FAILURE', errorCode: 'ERR_ACCOUNT_DISABLED', userAgent });
+      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_BLOCKED', status: 'FAILURE', errorCode: 'ERR_ACCOUNT_DISABLED', userAgent });
       throw new Error('Akun Anda dinonaktifkan. Silakan hubungi Administrator.');
     }
     if (user.lockedUntil && now < new Date(user.lockedUntil)) {
       throw new Error('Akun terkunci sementara karena percobaan gagal berulang kali.');
     }
-    
+
     const hasUpdatedPassword = Boolean(user.passwordUpdatedAt);
     const isInitialDefaultKey = !hasUpdatedPassword && (cleanPass === 'tfb2b2c' || cleanPass === 'AdminPassword2026!');
-    const isValidPassword = isInitialDefaultKey || verifyPassword(password, user.passwordHash) || verifyPassword(cleanPass, user.passwordHash);
+    const matchesHash = Boolean(user.passwordHash) && (verifyPassword(password, user.passwordHash) || verifyPassword(cleanPass, user.passwordHash));
+    const matchesSheetPlainIfUnsetHash = !user.passwordHash && Boolean(user.passwordDisplay) && String(user.passwordDisplay).trim() === cleanPass;
+    const isValidPassword = matchesHash || matchesSheetPlainIfUnsetHash || isInitialDefaultKey;
+
     if (!isValidPassword) {
       const failedCount = (Number(user.failedLoginCount) || 0) + 1;
       const updateData = { failedLoginCount: failedCount };
@@ -883,13 +922,13 @@ const AuthService = {
         updateData.lockedUntil = new Date(now.getTime() + DMS_CONFIG.LOCKOUT_DURATION_MINUTES * 60 * 1000).toISOString();
       }
       updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData);
-      AuditService.log({ userId: user.userId, userEmail: cleanEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_INVALID_PASSWORD', userAgent });
-      throw new Error('Password anda salah');
+      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_INVALID_PASSWORD', userAgent });
+      throw new Error('Password anda salah. Pastikan Anda menggunakan password terbaru Anda.');
     }
-    
-    // Sync passwordHash/passwordDisplay on initial default login if missing
+
+    // Sync passwordHash/passwordDisplay on initial default login or sheet-added row if missing
     const updateSuccessData = { failedLoginCount: 0, lockedUntil: '', lastLoginAt: now.toISOString() };
-    if (isInitialDefaultKey && (!user.passwordHash || !verifyPassword(cleanPass, user.passwordHash))) {
+    if ((isInitialDefaultKey || matchesSheetPlainIfUnsetHash) && (!user.passwordHash || !verifyPassword(cleanPass, user.passwordHash))) {
       updateSuccessData.passwordHash = hashPassword(cleanPass, generateSalt());
       updateSuccessData.passwordDisplay = cleanPass;
       updateSuccessData.mustChangePassword = false;
@@ -898,26 +937,39 @@ const AuthService = {
       updateSuccessData.passwordDisplay = cleanPass;
     }
     updateRecordByRow(SHEETS.USERS, user._rowNumber, updateSuccessData);
-    
+
     const rawToken = generateSessionToken(user.userId);
     const tokenHash = hashSessionToken(rawToken);
     const timeoutMin = Number(ConfigService.get('SESSION_TIMEOUT_MIN', DMS_CONFIG.DEFAULT_SESSION_TIMEOUT_MINUTES));
     const expiresAt = new Date(now.getTime() + timeoutMin * 60 * 1000).toISOString();
     const sessionId = generateId('SES');
-    
+
     appendRecord(SHEETS.SESSIONS, {
       sessionId, userId: user.userId, tokenHash, createdAt: now.toISOString(), lastActivityAt: now.toISOString(), expiresAt, userAgent: userAgent || 'Browser', isValid: true
     });
-    
+
     CacheService.getScriptCache().put('TOKEN_' + tokenHash, JSON.stringify({
-      sessionId, userId: user.userId, userEmail: cleanEmail, userName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true', lastActivityAt: now.getTime(), expiresAt: new Date(expiresAt).getTime()
+      sessionId, userId: user.userId, userEmail: resolvedEmail, userName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true', lastActivityAt: now.getTime(), expiresAt: new Date(expiresAt).getTime()
     }), timeoutMin * 60);
-    
-    AuditService.log({ userId: user.userId, userEmail: cleanEmail, userName: user.fullName, role: user.role, sessionId, action: 'LOGIN_SUCCESS', status: 'SUCCESS', userAgent });
-    
+
+    AuditService.log({ userId: user.userId, userEmail: resolvedEmail, userName: user.fullName, role: user.role, sessionId, action: 'LOGIN_SUCCESS', status: 'SUCCESS', userAgent });
+
+    let spreadsheetName = DMS_CONFIG.DATABASE_SPREADSHEET_NAME;
+    try { spreadsheetName = getDatabaseSpreadsheet().getName(); } catch (e) {}
+
     return {
       sessionToken: rawToken,
-      user: { userId: user.userId, email: cleanEmail, fullName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true' }
+      spreadsheetName: spreadsheetName,
+      user: {
+        userId: user.userId,
+        email: resolvedEmail,
+        fullName: user.fullName,
+        role: user.role,
+        mustChangePassword: String(user.mustChangePassword) === 'true',
+        passwordStatus: hasUpdatedPassword ? 'UPDATED' : 'EXISTING',
+        passwordUpdatedAt: user.passwordUpdatedAt || '',
+        passwordUpdatedBy: user.passwordUpdatedBy || ''
+      }
     };
   },
 
@@ -1001,14 +1053,25 @@ const AuthService = {
     return true;
   },
 
-  changePassword(token, currentPassword, newPassword) {
+  changePassword(token, currentPassword, newPassword, targetEmail) {
     const auth = this.assertAuthenticated(token);
-    const user = findRecord(SHEETS.USERS, u => u.userId === auth.user.userId);
-    if (!user) throw new Error('User not found.');
+    invalidateSheetCache(SHEETS.USERS);
+    const lookupEmail = String(targetEmail || auth.user.email || '').trim().toLowerCase();
+    let user = findRecord(SHEETS.USERS, u =>
+      u.userId === auth.user.userId ||
+      (lookupEmail && String(u.email || '').trim().toLowerCase() === lookupEmail)
+    );
+    if (!user) throw new Error('User tidak ditemukan di database DMS Unit Taskforce B2B2C.');
+
     const curPass = String(currentPassword || '').trim();
     const nextPass = String(newPassword || '').trim();
-    const matchesStored = verifyPassword(curPass, user.passwordHash) || (user.passwordDisplay && String(user.passwordDisplay) === curPass);
-    if (!matchesStored) throw new Error('Password saat ini tidak sesuai.');
+    const hasUpdatedBefore = Boolean(user.passwordUpdatedAt);
+    const matchesHash = Boolean(user.passwordHash) && verifyPassword(curPass, user.passwordHash);
+    const matchesDisplay = Boolean(user.passwordDisplay) && String(user.passwordDisplay).trim() === curPass;
+    const matchesInitialDefault = !hasUpdatedBefore && (curPass === 'tfb2b2c' || curPass === 'AdminPassword2026!');
+    if (!matchesHash && !matchesDisplay && !matchesInitialDefault) {
+      throw new Error('Password saat ini tidak sesuai.');
+    }
 
     const requireComplexity = String(ConfigService.get('REQUIRE_PASSWORD_COMPLEXITY', 'true')) === 'true';
     if (requireComplexity) {
@@ -1033,8 +1096,15 @@ const AuthService = {
       passwordUpdatedAt: now,
       passwordUpdatedBy: updatedBy,
       mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: '',
       status: USER_STATUSES.ACTIVE
     });
+    invalidateSheetCache(SHEETS.USERS);
+
+    let spreadsheetName = DMS_CONFIG.DATABASE_SPREADSHEET_NAME;
+    try { spreadsheetName = getDatabaseSpreadsheet().getName(); } catch (e) {}
+
     AuditService.log({
       userId: user.userId,
       userEmail: user.email,
@@ -1043,13 +1113,17 @@ const AuthService = {
       action: 'PASSWORD_CHANGED',
       targetType: 'USER',
       targetName: user.email,
-      details: { updatedBy: updatedBy, updatedAt: now },
+      details: { updatedBy: updatedBy, updatedAt: now, spreadsheetName: spreadsheetName },
       status: 'SUCCESS'
     });
     return {
       success: true,
-      message: 'Password berhasil diperbarui.',
+      syncedToSheet: true,
+      spreadsheetName: spreadsheetName,
+      message: `Password berhasil diperbarui & tersimpan langsung ke Google Sheet ${spreadsheetName}.`,
       userId: user.userId,
+      email: user.email,
+      fullName: user.fullName,
       password: nextPass,
       passwordStatus: 'UPDATED',
       passwordUpdatedAt: now,
@@ -1097,20 +1171,23 @@ const UserService = {
   },
   getUsers(sessionToken) {
     const auth = AuthService.assertAuthenticated(sessionToken);
+    invalidateSheetCache(SHEETS.USERS);
     const allUsers = readAllRecords(SHEETS.USERS);
     // Strict RBAC: Super Admin sees all users; standard USER sees ONLY their own account
     if (auth.user.role === USER_ROLES.SUPER_ADMIN) {
       return allUsers.map(u => this._mapUserOutput(u));
     }
     const selfRecord = allUsers.find(
-      u => u.userId === auth.user.userId || String(u.email).toLowerCase() === String(auth.user.email).toLowerCase()
+      u => u.userId === auth.user.userId || String(u.email || '').trim().toLowerCase() === String(auth.user.email || '').trim().toLowerCase()
     );
     return selfRecord ? [this._mapUserOutput(selfRecord)] : [];
   },
   createUser(sessionToken, payload) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
-    const cleanEmail = String(payload.email).trim().toLowerCase();
-    if (findRecord(SHEETS.USERS, u => String(u.email).toLowerCase() === cleanEmail)) {
+    invalidateSheetCache(SHEETS.USERS);
+    const cleanEmail = String(payload.email || '').trim().toLowerCase();
+    if (!cleanEmail) throw new Error('Email wajib diisi.');
+    if (findRecord(SHEETS.USERS, u => String(u.email || '').trim().toLowerCase() === cleanEmail)) {
       throw new Error(`User with email '${cleanEmail}' already exists.`);
     }
     const role = (payload.role === USER_ROLES.SUPER_ADMIN) ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER;
@@ -1119,11 +1196,11 @@ const UserService = {
     const newUserRecord = {
       userId: newUserId,
       email: cleanEmail,
-      fullName: String(payload.fullName).trim(),
+      fullName: String(payload.fullName || '').trim(),
       role,
       passwordHash: hashPassword(initialPass, generateSalt()),
-      status: USER_STATUSES.PENDING,
-      mustChangePassword: true,
+      status: USER_STATUSES.ACTIVE,
+      mustChangePassword: false,
       failedLoginCount: 0,
       lockedUntil: '',
       createdAt: new Date().toISOString(),
@@ -1133,51 +1210,163 @@ const UserService = {
       passwordUpdatedBy: ''
     };
     appendRecord(SHEETS.USERS, newUserRecord);
+    invalidateSheetCache(SHEETS.USERS);
     AuditService.log({ userId: admin.user.userId, userEmail: admin.user.email, action: 'CREATE_USER', status: 'SUCCESS', targetName: cleanEmail });
-    return { success: true, user: this._mapUserOutput(newUserRecord) };
+    return { success: true, syncedToSheet: true, user: this._mapUserOutput(newUserRecord) };
   },
   updateUser(sessionToken, userId, payload) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
-    const user = findRecord(SHEETS.USERS, u => u.userId === userId);
+    invalidateSheetCache(SHEETS.USERS);
+    const lookupEmail = String(payload.email || '').trim().toLowerCase();
+    let user = findRecord(SHEETS.USERS, u =>
+      u.userId === userId ||
+      (lookupEmail && String(u.email || '').trim().toLowerCase() === lookupEmail)
+    );
+    if (!user && lookupEmail) {
+      // Auto-create missing user row in DMS Unit Taskforce B2B2C so updates never fail for seeded accounts
+      const nowInit = new Date().toISOString();
+      const seedPass = String(payload.password || payload.key || 'AdminPassword2026!').trim();
+      const created = {
+        userId: userId || generateId('USR'),
+        email: lookupEmail,
+        fullName: String(payload.fullName || lookupEmail).trim(),
+        role: payload.role === USER_ROLES.SUPER_ADMIN ? USER_ROLES.SUPER_ADMIN : USER_ROLES.USER,
+        passwordHash: hashPassword(seedPass, generateSalt()),
+        status: payload.status || USER_STATUSES.ACTIVE,
+        mustChangePassword: false,
+        failedLoginCount: 0,
+        lockedUntil: '',
+        createdAt: nowInit,
+        lastLoginAt: '',
+        passwordDisplay: seedPass,
+        passwordUpdatedAt: nowInit,
+        passwordUpdatedBy: `${admin.user.fullName || admin.user.email} (Super Admin)`
+      };
+      appendRecord(SHEETS.USERS, created);
+      invalidateSheetCache(SHEETS.USERS);
+      return {
+        success: true,
+        syncedToSheet: true,
+        passwordUpdated: true,
+        message: 'Akun & password berhasil disimpan ke Google Sheet DMS Unit Taskforce B2B2C.',
+        user: this._mapUserOutput(created)
+      };
+    }
     if (!user) throw new Error('User not found.');
     const updateData = {};
+    let passwordWasUpdated = false;
     if (payload.fullName) updateData.fullName = String(payload.fullName).trim();
     if (payload.role && [USER_ROLES.SUPER_ADMIN, USER_ROLES.USER].includes(payload.role)) updateData.role = payload.role;
     if (payload.status && [USER_STATUSES.ACTIVE, USER_STATUSES.PENDING, USER_STATUSES.DISABLED].includes(payload.status)) updateData.status = payload.status;
     const nextPass = String(payload.password || payload.key || '').trim();
-    if (nextPass && nextPass !== String(user.passwordDisplay || '')) {
+    if (nextPass && nextPass !== String(user.passwordDisplay || '').trim()) {
       const now = new Date().toISOString();
       updateData.passwordHash = hashPassword(nextPass, generateSalt());
       updateData.passwordDisplay = nextPass;
       updateData.passwordUpdatedAt = now;
       updateData.passwordUpdatedBy = `${admin.user.fullName || admin.user.email} (Super Admin)`;
       updateData.mustChangePassword = false;
+      updateData.failedLoginCount = 0;
+      updateData.lockedUntil = '';
+      passwordWasUpdated = true;
     }
     updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData);
-    return { success: true, message: 'User updated.' };
+    invalidateSheetCache(SHEETS.USERS);
+    const refreshedUser = Object.assign({}, user, updateData);
+    return {
+      success: true,
+      syncedToSheet: true,
+      passwordUpdated: passwordWasUpdated,
+      message: passwordWasUpdated
+        ? 'Akun & password berhasil diperbarui langsung ke Google Sheet DMS Unit Taskforce B2B2C.'
+        : 'Data pengguna berhasil diperbarui di Google Sheet DMS Unit Taskforce B2B2C.',
+      user: this._mapUserOutput(refreshedUser)
+    };
   },
   setUserStatus(sessionToken, userId, newStatus) {
     AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
+    invalidateSheetCache(SHEETS.USERS);
     const user = findRecord(SHEETS.USERS, u => u.userId === userId);
     if (!user) throw new Error('User not found.');
     updateRecordByRow(SHEETS.USERS, user._rowNumber, { status: newStatus });
-    return { success: true, message: 'Status updated.' };
+    invalidateSheetCache(SHEETS.USERS);
+    return { success: true, syncedToSheet: true, message: 'Status updated.' };
   },
-  resetUserPassword(sessionToken, userId, tempPassword) {
+  resetUserPassword(sessionToken, userId, tempPassword, targetEmail) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
-    const user = findRecord(SHEETS.USERS, u => u.userId === userId);
-    if (!user) throw new Error('User not found.');
+    invalidateSheetCache(SHEETS.USERS);
+    const lookupEmail = String(targetEmail || '').trim().toLowerCase();
+    let user = findRecord(SHEETS.USERS, u =>
+      u.userId === userId ||
+      (lookupEmail && String(u.email || '').trim().toLowerCase() === lookupEmail)
+    );
     const nextPass = String(tempPassword || '').trim();
+    if (!nextPass) throw new Error('Password baru tidak boleh kosong.');
     const now = new Date().toISOString();
     const updatedBy = `${admin.user.fullName || admin.user.email} (Super Admin)`;
-    updateRecordByRow(SHEETS.USERS, user._rowNumber, {
+
+    if (!user && lookupEmail) {
+      const created = {
+        userId: userId || generateId('USR'),
+        email: lookupEmail,
+        fullName: lookupEmail,
+        role: USER_ROLES.USER,
+        passwordHash: hashPassword(nextPass, generateSalt()),
+        status: USER_STATUSES.ACTIVE,
+        mustChangePassword: false,
+        failedLoginCount: 0,
+        lockedUntil: '',
+        createdAt: now,
+        lastLoginAt: '',
+        passwordDisplay: nextPass,
+        passwordUpdatedAt: now,
+        passwordUpdatedBy: updatedBy
+      };
+      appendRecord(SHEETS.USERS, created);
+      invalidateSheetCache(SHEETS.USERS);
+      return {
+        success: true,
+        syncedToSheet: true,
+        message: 'Password berhasil disimpan ke Google Sheet DMS Unit Taskforce B2B2C.',
+        password: nextPass,
+        passwordUpdatedAt: now,
+        passwordUpdatedBy: updatedBy,
+        user: this._mapUserOutput(created)
+      };
+    }
+
+    if (!user) throw new Error('User not found.');
+    const updateData = {
       passwordHash: hashPassword(nextPass, generateSalt()),
       passwordDisplay: nextPass,
       passwordUpdatedAt: now,
       passwordUpdatedBy: updatedBy,
-      mustChangePassword: true
+      mustChangePassword: false,
+      failedLoginCount: 0,
+      lockedUntil: '',
+      status: user.status === USER_STATUSES.PENDING ? USER_STATUSES.ACTIVE : user.status
+    };
+    updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData);
+    invalidateSheetCache(SHEETS.USERS);
+    const refreshedUser = Object.assign({}, user, updateData);
+    AuditService.log({
+      userId: admin.user.userId,
+      userEmail: admin.user.email,
+      action: 'PASSWORD_RESET',
+      targetType: 'USER',
+      targetName: user.email,
+      details: { updatedBy: updatedBy, updatedAt: now },
+      status: 'SUCCESS'
     });
-    return { success: true, message: 'Password reset.', password: nextPass, passwordUpdatedAt: now, passwordUpdatedBy: updatedBy };
+    return {
+      success: true,
+      syncedToSheet: true,
+      message: 'Password berhasil diperbarui langsung ke Google Sheet DMS Unit Taskforce B2B2C.',
+      password: nextPass,
+      passwordUpdatedAt: now,
+      passwordUpdatedBy: updatedBy,
+      user: this._mapUserOutput(refreshedUser)
+    };
   },
   deleteUser(sessionToken, userId) {
     const admin = AuthService.assertRole(sessionToken, USER_ROLES.SUPER_ADMIN);
@@ -1985,6 +2174,43 @@ function doGet(e) {
  * When deployed as a Web App executed as jackslomberger@gmail.com,
  * all file uploads directly save to jackslomberger@gmail.com's Google Drive.
  */
+const ALLOWED_API_ACTIONS = {
+  apiGetPortalInitialData: true,
+  apiLogin: true,
+  apiLogout: true,
+  apiValidateSession: true,
+  apiChangePassword: true,
+  apiGetUsers: true,
+  apiCreateUser: true,
+  apiUpdateUser: true,
+  apiSetUserStatus: true,
+  apiResetUserPassword: true,
+  apiDeleteUser: true,
+  apiGetProjects: true,
+  apiGetProjectById: true,
+  apiCreateProject: true,
+  apiUpdateProject: true,
+  apiArchiveProject: true,
+  apiGetProjectExplorerData: true,
+  apiUploadDocument: true,
+  apiGetDocumentsByCategory: true,
+  apiGetDocumentMetadata: true,
+  apiOpenDocumentForReading: true,
+  apiUpdateDocumentMetadata: true,
+  apiSearchDocuments: true,
+  apiToggleFavorite: true,
+  apiGetFavorites: true,
+  apiGetRecents: true,
+  apiSoftDeleteDocument: true,
+  apiRestoreDocument: true,
+  apiPurgeDocument: true,
+  apiEmptyTrash: true,
+  apiGetTrashDocuments: true,
+  apiGetAuditLogs: true,
+  apiGetSystemConfigs: true,
+  apiUpdateSystemConfigs: true
+};
+
 function doPost(e) {
   try {
     let payload = {};
@@ -1993,10 +2219,15 @@ function doPost(e) {
     } else if (e && e.parameter) {
       payload = e.parameter;
     }
-    const action = payload.action;
-    const args = payload.args || [];
-    
-    // Check if function exists in global scope
+    const action = String(payload.action || '').trim();
+    const args = Array.isArray(payload.args) ? payload.args : [];
+
+    // Enforce explicit API action allowlist
+    if (!ALLOWED_API_ACTIONS[action]) {
+      return ContentService.createTextOutput(JSON.stringify(apiResponseError('ERR_METHOD_NOT_ALLOWED', 'API Action ' + action + ' is not allowed.')))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const fn = this[action];
     if (typeof fn === 'function') {
       const result = fn.apply(this, args);
@@ -2118,7 +2349,7 @@ function apiValidateSession(sessionToken) {
 function apiChangePassword(payload) {
   try {
     const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
-    return apiResponseSuccess(AuthService.changePassword(data.sessionToken, data.currentPassword, data.newPassword));
+    return apiResponseSuccess(AuthService.changePassword(data.sessionToken, data.currentPassword, data.newPassword, data.email));
   } catch (err) { return apiResponseError('ERR_PASSWORD_CHANGE', err.message); }
 }
 
@@ -2144,8 +2375,8 @@ function apiSetUserStatus(sessionToken, userId, status) {
   try { return apiResponseSuccess(UserService.setUserStatus(sessionToken, userId, status)); } catch (err) { return apiResponseError('ERR_SET_USER_STATUS', err.message); }
 }
 
-function apiResetUserPassword(sessionToken, userId, tempPassword) {
-  try { return apiResponseSuccess(UserService.resetUserPassword(sessionToken, userId, tempPassword)); } catch (err) { return apiResponseError('ERR_RESET_PASSWORD', err.message); }
+function apiResetUserPassword(sessionToken, userId, tempPassword, targetEmail) {
+  try { return apiResponseSuccess(UserService.resetUserPassword(sessionToken, userId, tempPassword, targetEmail)); } catch (err) { return apiResponseError('ERR_RESET_PASSWORD', err.message); }
 }
 
 function apiDeleteUser(sessionToken, userId) {
@@ -2319,10 +2550,11 @@ function setupDMS() {
     const existingUsers = readAllRecords(SHEETS.USERS);
     const existingEmails = new Set(existingUsers.map(u => String(u.email).toLowerCase()));
     const initialAdmins = [
-      { email: 'admin@jasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN-ALIAS' },
-      { email: 'admin@asuransijasindo.co.id', fullName: 'Primary Administrator', pass: 'tfb2b2c', userId: 'USR-ADMIN' },
-      { email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer', pass: 'tfb2b2c', userId: 'USR-DEFAULT' },
-      { email: 'imam02778@asuransijasindo.co.id', fullName: 'Imam Ashyri', pass: 'tfb2b2c', userId: 'USR-001-IA' }
+      { email: 'jackslomberger@gmail.com', fullName: 'Jack Slomberger (Super Admin)', pass: 'AdminPassword2026!', userId: 'USR-JACK' },
+      { email: 'admin@jasindo.co.id', fullName: 'Primary Administrator', pass: 'AdminPassword2026!', userId: 'USR-ADMIN-ALIAS' },
+      { email: 'admin@asuransijasindo.co.id', fullName: 'Primary Administrator', pass: 'AdminPassword2026!', userId: 'USR-ADMIN' },
+      { email: 'email@asuransijasindo.co.id', fullName: 'Corporate Officer', pass: 'AdminPassword2026!', userId: 'USR-DEFAULT' },
+      { email: 'imam02778@asuransijasindo.co.id', fullName: 'Imam Ashyri', pass: 'AdminPassword2026!', userId: 'USR-001-IA' }
     ];
     initialAdmins.forEach(adm => {
       if (!existingEmails.has(adm.email.toLowerCase())) {
@@ -2338,7 +2570,10 @@ function setupDMS() {
           failedLoginCount: 0,
           lockedUntil: '',
           createdAt: new Date().toISOString(),
-          lastLoginAt: ''
+          lastLoginAt: '',
+          passwordDisplay: adm.pass,
+          passwordUpdatedAt: '',
+          passwordUpdatedBy: ''
         });
       }
     });
