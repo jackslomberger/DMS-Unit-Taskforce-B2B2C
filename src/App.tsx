@@ -36,6 +36,22 @@ export default function App() {
     };
     window.addEventListener('message', handleMessage);
 
+    // Pre-warm Google Apps Script Web App container immediately on page load so Sign In to Portal is fast
+    if (remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
+      const prewarmCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const prewarmTimer = prewarmCtrl ? setTimeout(() => prewarmCtrl.abort(), 8000) : null;
+      fetch(remoteUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'apiPing', args: [] }),
+        redirect: 'follow',
+        keepalive: true,
+        signal: prewarmCtrl ? prewarmCtrl.signal : undefined
+      })
+        .catch(() => {})
+        .finally(() => { if (prewarmTimer) clearTimeout(prewarmTimer); });
+    }
+
     // Auto-fetch dms-config.json to sync any updated global endpoint config
     fetch('/dms-config.json')
       .then(res => (res.ok ? res.json() : null))

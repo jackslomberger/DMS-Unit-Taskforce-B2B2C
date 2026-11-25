@@ -4,10 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Unit Taskforce B2B2C DMS - Asuransi Jasindo</title>
-  <!-- PDF.js for native client-side rendering of uploaded PDF documents -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- JSZip for native client-side reading of uploaded Word (.docx) & Excel (.xlsx) documents -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <link rel="preconnect" href="https://script.google.com" crossorigin>
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+  <link rel="dns-prefetch" href="https://drive.google.com">
+  <!-- PDF.js for native client-side rendering of uploaded PDF documents (deferred so login renders instantly) -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- JSZip for native client-side reading of uploaded Word (.docx) & Excel (.xlsx) documents (deferred) -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     :root {
       --navy-950: #060D1A;
@@ -1351,7 +1354,7 @@
         </div>
         <div style="margin-bottom: 1.1rem;">
           <label style="font-size: 11.5px; font-weight: 600; color: var(--slate-700); display: block; margin-bottom: 5px;">Corporate Email</label>
-          <input type="email" id="login-email" class="input-field" placeholder="email@asuransijasindo.co.id" value="" required autocomplete="email" style="height: 40px; font-size: 13px;" oninput="this.classList.remove('input-error'); document.getElementById('login-error-alert').style.display='none';">
+          <input type="email" id="login-email" class="input-field" placeholder="email@asuransijasindo.co.id" value="" required autocomplete="email" style="height: 40px; font-size: 13px;" onfocus="ServerApi.prewarmAuthEndpoint()" oninput="this.classList.remove('input-error'); document.getElementById('login-error-alert').style.display='none';">
         </div>
         <div style="margin-bottom: 1.5rem;">
           <label style="font-size: 11.5px; font-weight: 600; color: var(--slate-700); display: block; margin-bottom: 5px;">Password / Access Key</label>
@@ -1482,7 +1485,7 @@
           <button type="button" class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleSidebarMobile()" title="Menu Navigasi">
             <span>☰</span>
           </button>
-          <h1 class="page-heading" id="page-heading">Corporate Dashboard</h1>
+          <h1 class="page-heading" id="page-heading">DMS Dashboard</h1>
         </div>
 
         <div class="topbar-center">
@@ -3117,6 +3120,74 @@
       _mockAuditLogs: [],
       _mockDocuments: [],
 
+      _lastPrewarmAt: 0,
+      prewarmAuthEndpoint(force = false) {
+        try {
+          const now = Date.now();
+          if (!force && this._lastPrewarmAt && (now - this._lastPrewarmAt) < 90000) return;
+          const remoteUrl = getGoogleDriveEndpointUrl();
+          if (!remoteUrl || !remoteUrl.startsWith('https://script.google.com/macros/s/')) return;
+          this._lastPrewarmAt = now;
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+          fetch(remoteUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'apiPing', args: [] }),
+            redirect: 'follow',
+            keepalive: true,
+            signal: controller ? controller.signal : undefined
+          })
+            .catch(() => {})
+            .finally(() => { if (timer) clearTimeout(timer); });
+        } catch (e) {}
+      },
+
+      _matchCachedLocalUser(inputEmail, inputPassword) {
+        this._loadMockUsers();
+        let user = this._mockUsers.find(u =>
+          (u.email || '').toLowerCase() === inputEmail ||
+          (u.userId || '').toLowerCase() === inputEmail
+        );
+        if (!user) {
+          if (inputEmail === 'admin' || inputEmail === 'superadmin') {
+            user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'admin@asuransijasindo.co.id');
+          } else if (inputEmail === 'jack') {
+            user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'jackslomberger@gmail.com');
+          } else if (inputEmail === 'imam') {
+            user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'imam02778@asuransijasindo.co.id');
+          }
+        }
+        if (!user) return { found: false, valid: false, disabled: false, user: null };
+        if (user.status === 'DISABLED') return { found: true, valid: false, disabled: true, user };
+        const expectedPassword = String(user.password || 'AdminPassword2026!').trim();
+        const hasUpdatedPassword = Boolean(user.passwordUpdatedAt) || user.passwordStatus === 'UPDATED';
+        const isLegacySeedAdminKey = !hasUpdatedPassword && user.role === 'SUPER_ADMIN' && inputPassword === 'tfb2b2c';
+        const isPassValid = (inputPassword === expectedPassword) || isLegacySeedAdminKey;
+        return { found: true, valid: isPassValid, disabled: false, user };
+      },
+
+      _buildLocalSessionPayload(user) {
+        user.lastLoginAt = new Date().toISOString();
+        if (user.status === 'PENDING') {
+          user.status = 'ACTIVE';
+        }
+        this._saveMockUsers();
+        return {
+          sessionToken: `DMS_SES_LOCAL__${user.userId}__${Date.now().toString(16).toUpperCase()}`,
+          provisional: true,
+          user: {
+            userId: user.userId,
+            email: user.email,
+            fullName: user.fullName,
+            role: user.role,
+            mustChangePassword: !!user.mustChangePassword,
+            passwordStatus: user.passwordStatus || 'EXISTING',
+            passwordUpdatedAt: user.passwordUpdatedAt || ''
+          }
+        };
+      },
+
       _syncRemoteBackground(methodName, args, onFreshData) {
         const remoteUrl = getGoogleDriveEndpointUrl();
         if (!remoteUrl || !remoteUrl.startsWith('https://script.google.com/macros/s/')) return;
@@ -3222,7 +3293,7 @@
           // 2. Lingkungan Vercel / GitHub / Local Web App
           const remoteUrl = getGoogleDriveEndpointUrl();
 
-          // LIVE CROSS-DEVICE LOGIN DIRECTLY AGAINST GOOGLE SHEET "DMS Unit Taskforce B2B2C"
+          // ESCALATED LIVE CROSS-DEVICE LOGIN AGAINST GOOGLE SHEET "DMS Unit Taskforce B2B2C"
           if (methodName === 'apiLogin') {
             this._loadMockUsers();
             const creds = typeof args[0] === 'string' ? JSON.parse(args[0]) : (args[0] || {});
@@ -3236,99 +3307,139 @@
               return reject(new Error('Password wajib diisi.'));
             }
 
-            // First: authenticate directly against live Google Sheet database (DMS Unit Taskforce B2B2C)
+            const localMatch = this._matchCachedLocalUser(inputEmail, inputPassword);
+
+            // Authenticate directly against live Google Sheet database (DMS Unit Taskforce B2B2C)
             if (remoteUrl && remoteUrl.startsWith('https://script.google.com/macros/s/')) {
+              let settled = false;
+              let fastTrackTimer = null;
+              let provisionalToken = null;
               const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-              const timer = controller ? setTimeout(() => controller.abort(), 18000) : null;
-              try {
-                const resp = await fetch(remoteUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                  body: JSON.stringify({
-                    action: 'apiLogin',
-                    args: [JSON.stringify({ email: inputEmail, password: inputPassword, userAgent: navigator.userAgent })]
-                  }),
-                  redirect: 'follow',
-                  signal: controller ? controller.signal : undefined
-                });
-                if (timer) clearTimeout(timer);
-                if (resp.ok) {
-                  const resData = await resp.json();
-                  if (resData && resData.success === false) {
-                    const errMsg = resData.error ? (resData.error.message || resData.error) : 'Password atau email Anda salah.';
-                    // Authoritative rejection from DMS Unit Taskforce B2B2C sheet — NEVER fall back to stale localStorage password!
-                    return reject(new Error(errMsg));
-                  }
-                  if (resData && resData.success === true && resData.data && resData.data.user) {
-                    const livePayload = resData.data;
-                    const syncedUser = this._syncSingleUserFromSheet(livePayload.user, inputPassword);
-                    return wrappedResolve({
+              const abortTimer = controller ? setTimeout(() => controller.abort(), 16000) : null;
+
+              const liveAuthPromise = fetch(remoteUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                  action: 'apiLogin',
+                  args: [JSON.stringify({ email: inputEmail, password: inputPassword, userAgent: navigator.userAgent })]
+                }),
+                redirect: 'follow',
+                keepalive: true,
+                priority: 'high',
+                signal: controller ? controller.signal : undefined
+              }).then(async (resp) => {
+                if (abortTimer) clearTimeout(abortTimer);
+                if (!resp.ok) {
+                  throw new Error(`HTTP ${resp.status}`);
+                }
+                const resData = await resp.json();
+                if (resData && resData.success === false) {
+                  const errMsg = resData.error ? (resData.error.message || resData.error) : 'Password atau email Anda salah.';
+                  return { authoritativeReject: true, errorMessage: errMsg };
+                }
+                if (resData && resData.success === true && resData.data && resData.data.user) {
+                  const livePayload = resData.data;
+                  const syncedUser = this._syncSingleUserFromSheet(livePayload.user, inputPassword);
+                  return {
+                    authoritativeApprove: true,
+                    payload: {
                       sessionToken: livePayload.sessionToken,
                       spreadsheetName: livePayload.spreadsheetName || 'DMS Unit Taskforce B2B2C',
                       user: Object.assign({}, livePayload.user, {
                         passwordStatus: (syncedUser && syncedUser.passwordStatus) || livePayload.user.passwordStatus || 'EXISTING',
                         passwordUpdatedAt: (syncedUser && syncedUser.passwordUpdatedAt) || livePayload.user.passwordUpdatedAt || ''
                       })
-                    });
-                  }
+                    }
+                  };
                 }
-              } catch (netErr) {
-                if (timer) clearTimeout(timer);
-                console.warn('Live Google Sheet login unreachable, evaluating offline fallback:', netErr);
+                throw new Error('Invalid login response');
+              });
+
+              // Speed escalation: if Google Apps Script cold-starts (>2.2s) AND credentials match a verified cached active account,
+              // enter portal promptly while keeping authoritative live verification active in the background.
+              if (localMatch.valid && localMatch.user) {
+                fastTrackTimer = setTimeout(() => {
+                  if (settled) return;
+                  settled = true;
+                  const fastPayload = this._buildLocalSessionPayload(localMatch.user);
+                  provisionalToken = fastPayload.sessionToken;
+                  wrappedResolve(fastPayload);
+                }, 2200);
               }
+
+              liveAuthPromise
+                .then((outcome) => {
+                  if (fastTrackTimer) clearTimeout(fastTrackTimer);
+                  if (outcome.authoritativeReject) {
+                    if (!settled) {
+                      settled = true;
+                      return reject(new Error(outcome.errorMessage));
+                    }
+                    // If user entered via fast-track but live Sheet rejected (e.g. password changed on another device), revoke immediately!
+                    if (provisionalToken && AppState.sessionToken === provisionalToken) {
+                      AppState.sessionToken = null;
+                      AppState.currentUser = null;
+                      try {
+                        sessionStorage.removeItem('dms_session_token');
+                        sessionStorage.removeItem('dms_user');
+                      } catch (e) {}
+                      showLoginScreen();
+                      const errAlert = document.getElementById('login-error-alert');
+                      const errText = document.getElementById('login-error-text');
+                      if (errText) errText.innerText = outcome.errorMessage;
+                      if (errAlert) errAlert.style.display = 'flex';
+                    }
+                    return;
+                  }
+                  if (outcome.authoritativeApprove) {
+                    if (!settled) {
+                      settled = true;
+                      return wrappedResolve(outcome.payload);
+                    }
+                    // Seamlessly upgrade provisional session to authoritative live token from DMS Unit Taskforce B2B2C
+                    if (provisionalToken && AppState.sessionToken === provisionalToken) {
+                      AppState.sessionToken = outcome.payload.sessionToken;
+                      AppState.currentUser = Object.assign({}, AppState.currentUser || {}, outcome.payload.user);
+                      try {
+                        sessionStorage.setItem('dms_session_token', outcome.payload.sessionToken);
+                        sessionStorage.setItem('dms_user', JSON.stringify(AppState.currentUser));
+                        notifyParentAuthState(AppState.currentUser);
+                      } catch (e) {}
+                    }
+                  }
+                })
+                .catch((netErr) => {
+                  if (abortTimer) clearTimeout(abortTimer);
+                  if (fastTrackTimer) clearTimeout(fastTrackTimer);
+                  if (settled) return;
+                  settled = true;
+                  console.warn('Live Google Sheet login unreachable, evaluating offline fallback:', netErr);
+                  if (!localMatch.found) {
+                    return reject(new Error('Email anda salah. Akun tidak terdaftar, silakan hubungi Super Admin.'));
+                  }
+                  if (localMatch.disabled) {
+                    return reject(new Error('Akun Anda dinonaktifkan. Silakan hubungi Administrator.'));
+                  }
+                  if (!localMatch.valid) {
+                    return reject(new Error('Password anda salah. Silakan periksa kembali password terbaru Anda.'));
+                  }
+                  return wrappedResolve(this._buildLocalSessionPayload(localMatch.user));
+                });
+              return;
             }
 
-            // Offline fallback ONLY when Google Apps Script / internet is unreachable
-            let user = this._mockUsers.find(u =>
-              (u.email || '').toLowerCase() === inputEmail ||
-              (u.userId || '').toLowerCase() === inputEmail
-            );
-
-            if (!user) {
-              if (inputEmail === 'admin' || inputEmail === 'superadmin') {
-                user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'admin@asuransijasindo.co.id');
-              } else if (inputEmail === 'jack') {
-                user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'jackslomberger@gmail.com');
-              } else if (inputEmail === 'imam') {
-                user = this._mockUsers.find(u => (u.email || '').toLowerCase() === 'imam02778@asuransijasindo.co.id');
-              }
-            }
-
-            if (!user) {
+            // Offline fallback ONLY when Google Apps Script endpoint is not configured
+            if (!localMatch.found) {
               return reject(new Error('Email anda salah. Akun tidak terdaftar, silakan hubungi Super Admin.'));
             }
-            if (user.status === 'DISABLED') {
+            if (localMatch.disabled) {
               return reject(new Error('Akun Anda dinonaktifkan. Silakan hubungi Administrator.'));
             }
-
-            const expectedPassword = String(user.password || 'AdminPassword2026!').trim();
-            const hasUpdatedPassword = Boolean(user.passwordUpdatedAt) || user.passwordStatus === 'UPDATED';
-            const isLegacySeedAdminKey = !hasUpdatedPassword && user.role === 'SUPER_ADMIN' && inputPassword === 'tfb2b2c';
-            const isPassValid = (inputPassword === expectedPassword) || isLegacySeedAdminKey;
-
-            if (!isPassValid) {
+            if (!localMatch.valid) {
               return reject(new Error('Password anda salah. Silakan periksa kembali password terbaru Anda.'));
             }
-
-            user.lastLoginAt = new Date().toISOString();
-            if (user.status === 'PENDING') {
-              user.status = 'ACTIVE';
-            }
-            this._saveMockUsers();
-
-            const sessionPayload = {
-              sessionToken: `DMS_SES_LOCAL__${user.userId}__${Date.now().toString(16).toUpperCase()}`,
-              user: {
-                userId: user.userId,
-                email: user.email,
-                fullName: user.fullName,
-                role: user.role,
-                mustChangePassword: !!user.mustChangePassword,
-                passwordStatus: user.passwordStatus || 'EXISTING',
-                passwordUpdatedAt: user.passwordUpdatedAt || ''
-              }
-            };
-            return wrappedResolve(sessionPayload);
+            return wrappedResolve(this._buildLocalSessionPayload(localMatch.user));
           }
 
           // Direct live Google Sheet / Drive backend call for all non-local-fast methods (including ALL password & user management calls)
@@ -4265,6 +4376,7 @@
       ServerApi._loadMockUsers();
       ServerApi._loadMockProjects();
       ServerApi._loadMockDocuments();
+      ServerApi.prewarmAuthEndpoint();
       const storedToken = sessionStorage.getItem('dms_session_token');
       const storedUser = sessionStorage.getItem('dms_user');
       if (storedToken && storedUser) {
@@ -4275,9 +4387,28 @@
         } catch (e) {
           AppState.currentUser = null;
         }
-        ServerApi.call('apiValidateSession', storedToken)
-          .then(res => res && res.valid ? applyAuthenticatedSession(res.user) : showLoginScreen())
-          .catch(() => showLoginScreen());
+        if (AppState.currentUser) {
+          // Instant 0ms portal resume with background server-side session verification
+          applyAuthenticatedSession(AppState.currentUser);
+          ServerApi.call('apiValidateSession', storedToken)
+            .then(res => {
+              if (!res || !res.valid) {
+                AppState.sessionToken = null;
+                AppState.currentUser = null;
+                try {
+                  sessionStorage.removeItem('dms_session_token');
+                  sessionStorage.removeItem('dms_user');
+                } catch (e) {}
+                showLoginScreen();
+              } else if (res.user) {
+                AppState.currentUser = Object.assign({}, AppState.currentUser, res.user);
+                try { sessionStorage.setItem('dms_user', JSON.stringify(AppState.currentUser)); } catch (e) {}
+              }
+            })
+            .catch(() => {});
+        } else {
+          showLoginScreen();
+        }
       } else {
         showLoginScreen();
       }
@@ -4359,6 +4490,8 @@
             localStorage.setItem('dms_remote_api_url', newUrl);
             if (oldUrl !== newUrl && AppState.sessionToken) {
               DmsFastCache.prefetchCorePortalData();
+            } else if (!AppState.sessionToken) {
+              ServerApi.prewarmAuthEndpoint(oldUrl !== newUrl);
             }
           }
         }
@@ -4392,7 +4525,8 @@
         toggleBtn.style.color = '#64748B';
         toggleBtn.style.backgroundColor = 'transparent';
       }
-      if (emailInput) setTimeout(() => emailInput.focus(), 150);
+      ServerApi.prewarmAuthEndpoint();
+      if (emailInput) setTimeout(() => emailInput.focus(), 100);
     }
 
     async function handleLoginSubmit(e) {
@@ -4413,11 +4547,11 @@
       try {
         if (submitBtn) {
           submitBtn.disabled = true;
-          submitBtn.innerHTML = '<span class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></span> Validating credentials...';
+          submitBtn.innerHTML = '<span class="spinner" style="width: 16px; height: 16px; border-width: 2px;"></span> Signing in...';
         }
 
         const loginCall = ServerApi.call('apiLogin', JSON.stringify({ email, password }));
-        const timeoutCall = new Promise((_, rej) => setTimeout(() => rej(new Error('Koneksi validasi ke database DMS Unit Taskforce B2B2C timeout. Silakan coba lagi.')), 20000));
+        const timeoutCall = new Promise((_, rej) => setTimeout(() => rej(new Error('Koneksi validasi ke database DMS Unit Taskforce B2B2C timeout. Silakan coba lagi.')), 18000));
         const res = await Promise.race([loginCall, timeoutCall]);
 
         AppState.sessionToken = res.sessionToken;
@@ -4507,8 +4641,8 @@
         applyRuntimeSystemSettings();
       }
 
-      // Langsung sinkronisasi dengan Google Drive DMS_ROOT_REPOSITORY (jackslomberger@gmail.com)
-      DmsFastCache.prefetchCorePortalData(true);
+      // Non-blocking background sync dengan Google Drive DMS_ROOT_REPOSITORY agar masuk ke DMS Dashboard instan
+      DmsFastCache.prefetchCorePortalData(false);
       navigateTo('DASHBOARD');
     }
 
@@ -4556,7 +4690,7 @@
       });
       const isSuperAdmin = AppState.currentUser && AppState.currentUser.role === 'SUPER_ADMIN';
       const headings = {
-        'DASHBOARD': 'Corporate Dashboard',
+        'DASHBOARD': 'DMS Dashboard',
         'EXPLORER': 'Document Explorer',
         'PROJECTS': 'Project Repositories',
         'SEARCH': 'Smart Document Search',

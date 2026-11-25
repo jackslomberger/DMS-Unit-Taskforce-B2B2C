@@ -150,14 +150,27 @@ function constantTimeCompare(a, b) {
   return diff === 0;
 }
 
+var _MEM_PEPPER_SECRET = null;
+
 function getPepperSecret() {
+  if (_MEM_PEPPER_SECRET) return _MEM_PEPPER_SECRET;
   const props = PropertiesService.getScriptProperties();
   let pepper = props.getProperty('DMS_PEPPER_SECRET');
   if (!pepper) {
     pepper = DMS_CONFIG.PEPPER_DEFAULT;
     props.setProperty('DMS_PEPPER_SECRET', pepper);
   }
+  _MEM_PEPPER_SECRET = pepper;
   return pepper;
+}
+
+function computeFastAuthProofKey(userId, storedHash, plainPassword) {
+  const pepper = getPepperSecret();
+  const raw = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    'AUTH_PROOF_v1|' + String(userId || '') + '|' + String(storedHash || '') + '|' + String(plainPassword || '') + '|' + pepper
+  );
+  return 'AUTH_OK_' + Utilities.base64EncodeWebSafe(raw);
 }
 
 function hashSessionToken(token) {
@@ -187,15 +200,24 @@ function isDocDeletedRecord(d) {
 // SECTION 02: DATABASE LAYER & REPOSITORY ABSTRACTIONS
 // ============================================================================
 
+var _MEM_SPREADSHEET = null;
+var _MEM_SHEETS = {};
+
 function getDatabaseSpreadsheet() {
+  if (_MEM_SPREADSHEET) return _MEM_SPREADSHEET;
   const props = PropertiesService.getScriptProperties();
   const configuredSheetId = props.getProperty('DMS_SPREADSHEET_ID');
   if (configuredSheetId) {
-    try { return SpreadsheetApp.openById(configuredSheetId); } catch (e) {}
+    try {
+      _MEM_SPREADSHEET = SpreadsheetApp.openById(configuredSheetId);
+      return _MEM_SPREADSHEET;
+    } catch (e) {}
   }
   const active = SpreadsheetApp.getActiveSpreadsheet();
   if (active) {
     props.setProperty('DMS_SPREADSHEET_ID', active.getId());
+    try { props.setProperty('DMS_SPREADSHEET_NAME', active.getName()); } catch (e) {}
+    _MEM_SPREADSHEET = active;
     return active;
   }
   // Auto-discover Google Sheet database by exact name ("DMS Unit Taskforce B2B2C")
@@ -210,6 +232,8 @@ function getDatabaseSpreadsheet() {
         const ssFile = files.next();
         const ss = SpreadsheetApp.openById(ssFile.getId());
         props.setProperty('DMS_SPREADSHEET_ID', ss.getId());
+        try { props.setProperty('DMS_SPREADSHEET_NAME', ss.getName()); } catch (e) {}
+        _MEM_SPREADSHEET = ss;
         return ss;
       }
     } catch (e) {}
@@ -217,10 +241,26 @@ function getDatabaseSpreadsheet() {
   throw new Error('Database Error: File Google Sheet "DMS Unit Taskforce B2B2C" tidak ditemukan. Pastikan DMS_SPREADSHEET_ID terkonfigurasi atau file sheet tersedia di Google Drive.');
 }
 
+function getCachedSpreadsheetName() {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const cachedName = props.getProperty('DMS_SPREADSHEET_NAME');
+    if (cachedName) return cachedName;
+    const ss = getDatabaseSpreadsheet();
+    const name = ss.getName();
+    if (name) props.setProperty('DMS_SPREADSHEET_NAME', name);
+    return name || DMS_CONFIG.DATABASE_SPREADSHEET_NAME;
+  } catch (e) {
+    return DMS_CONFIG.DATABASE_SPREADSHEET_NAME;
+  }
+}
+
 function getDbSheet(sheetName) {
+  if (_MEM_SHEETS[sheetName]) return _MEM_SHEETS[sheetName];
   const ss = getDatabaseSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`Database Error: Required table '${sheetName}' does not exist. Run setupDMS() first.`);
+  _MEM_SHEETS[sheetName] = sheet;
   return sheet;
 }
 
@@ -303,8 +343,9 @@ function filterRecords(sheetName, predicate) {
   return records.filter(predicate);
 }
 
-function appendRecord(sheetName, recordObj) {
-  return withScriptLock(() => {
+function appendRecord(sheetName, recordObj, opts) {
+  const skipFlush = Boolean(opts && opts.skipFlush);
+  const executeAppend = () => {
     const sheet = getDbSheet(sheetName);
     const schema = TABLE_SCHEMAS[sheetName];
     if (!schema) throw new Error(`Schema not defined for table: ${sheetName}`);
@@ -313,10 +354,12 @@ function appendRecord(sheetName, recordObj) {
       return sanitizeFormula(val);
     });
     sheet.appendRow(row);
-    SpreadsheetApp.flush();
+    if (!skipFlush) SpreadsheetApp.flush();
     invalidateSheetCache(sheetName);
     return recordObj;
-  });
+  };
+  if (opts && opts.skipLock) return executeAppend();
+  return withScriptLock(executeAppend);
 }
 
 function ensureSheetSchemaColumns(sheet, sheetName) {
@@ -331,10 +374,12 @@ function ensureSheetSchemaColumns(sheet, sheetName) {
   }
 }
 
-function updateRecordByRow(sheetName, rowNumber, recordObj) {
-  return withScriptLock(() => {
+function updateRecordByRow(sheetName, rowNumber, recordObj, opts) {
+  const skipFlush = Boolean(opts && opts.skipFlush);
+  const skipSchemaCheck = Boolean(opts && opts.skipSchemaCheck);
+  const executeUpdate = () => {
     const sheet = getDbSheet(sheetName);
-    ensureSheetSchemaColumns(sheet, sheetName);
+    if (!skipSchemaCheck) ensureSheetSchemaColumns(sheet, sheetName);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => String(h).trim());
     const currentRow = sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0];
     for (let c = 0; c < headers.length; c++) {
@@ -342,10 +387,12 @@ function updateRecordByRow(sheetName, rowNumber, recordObj) {
       if (recordObj[colName] !== undefined) currentRow[c] = sanitizeFormula(recordObj[colName]);
     }
     sheet.getRange(rowNumber, 1, 1, headers.length).setValues([currentRow]);
-    SpreadsheetApp.flush();
+    if (!skipFlush) SpreadsheetApp.flush();
     invalidateSheetCache(sheetName);
     return true;
-  });
+  };
+  if (opts && opts.skipLock) return executeUpdate();
+  return withScriptLock(executeUpdate);
 }
 
 function deleteRecordByRow(sheetName, rowNumber) {
@@ -791,7 +838,7 @@ const AuditService = {
         status: event.status || 'SUCCESS',
         errorCode: event.errorCode || ''
       };
-      appendRecord(SHEETS.ACTIVITY_LOG, logRecord);
+      appendRecord(SHEETS.ACTIVITY_LOG, logRecord, event && event._fastWrite ? { skipFlush: true, skipLock: true } : undefined);
     } catch (err) {
       console.error('AuditService error:', err);
     }
@@ -854,13 +901,22 @@ const AuthService = {
     if (!email || !password) throw new Error('Email and password must be provided.');
     const cleanEmail = this._resolveLoginIdentifier(email);
     const cleanPass = String(password).trim();
+    const scriptCache = CacheService.getScriptCache();
 
-    // Always read fresh USERS table from Google Sheet DMS Unit Taskforce B2B2C so password updates on other devices apply immediately
-    invalidateSheetCache(SHEETS.USERS);
-    let user = findRecord(SHEETS.USERS, u =>
+    const findUserRecord = () => findRecord(SHEETS.USERS, u =>
       String(u.email || '').trim().toLowerCase() === cleanEmail ||
       String(u.userId || '').trim().toLowerCase() === cleanEmail
     );
+
+    // Fast cache-first lookup (password mutations already invalidate SHEETS.USERS);
+    // automatically re-reads live Google Sheet on cache miss or mismatch so manual Sheet edits also apply immediately.
+    let readFromLiveSheet = false;
+    let user = findUserRecord();
+    if (!user) {
+      invalidateSheetCache(SHEETS.USERS);
+      readFromLiveSheet = true;
+      user = findUserRecord();
+    }
     const now = new Date();
 
     // Auto-bootstrap Corporate Super Admins if not yet present in SHEETS.USERS
@@ -893,27 +949,62 @@ const AuthService = {
         passwordUpdatedBy: ''
       };
       appendRecord(SHEETS.USERS, newAdminRecord);
-      user = findRecord(SHEETS.USERS, u => String(u.email || '').trim().toLowerCase() === cleanEmail);
+      user = findUserRecord();
     }
 
     if (!user) {
-      AuditService.log({ userEmail: cleanEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_USER_NOT_FOUND', userAgent });
+      AuditService.log({ userEmail: cleanEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_USER_NOT_FOUND', userAgent, _fastWrite: true });
       throw new Error('Email anda salah. Akun tidak terdaftar pada database DMS Unit Taskforce B2B2C.');
     }
+
+    const evaluatePasswordForUser = (uRec) => {
+      const hasUpd = Boolean(uRec.passwordUpdatedAt);
+      const isInitDefault = !hasUpd && (cleanPass === 'tfb2b2c' || cleanPass === 'AdminPassword2026!');
+      let hashOk = false;
+      if (uRec.passwordHash) {
+        const proofKey = computeFastAuthProofKey(uRec.userId, uRec.passwordHash, cleanPass);
+        if (scriptCache.get(proofKey) === '1') {
+          hashOk = true;
+        } else {
+          hashOk = verifyPassword(cleanPass, uRec.passwordHash) || (String(password) !== cleanPass && verifyPassword(password, uRec.passwordHash));
+          if (hashOk) {
+            try { scriptCache.put(proofKey, '1', 21600); } catch (e) {}
+          }
+        }
+      }
+      const plainIfUnsetHash = !uRec.passwordHash && Boolean(uRec.passwordDisplay) && String(uRec.passwordDisplay).trim() === cleanPass;
+      return {
+        hasUpdatedPassword: hasUpd,
+        isInitialDefaultKey: isInitDefault,
+        matchesHash: hashOk,
+        matchesSheetPlainIfUnsetHash: plainIfUnsetHash,
+        isValidPassword: hashOk || plainIfUnsetHash || isInitDefault
+      };
+    };
+
+    let check = evaluatePasswordForUser(user);
+
+    // If cached record failed verification or was disabled/locked, re-check directly against live Google Sheet before rejecting
+    if ((!check.isValidPassword || user.status === USER_STATUSES.DISABLED) && !readFromLiveSheet) {
+      invalidateSheetCache(SHEETS.USERS);
+      readFromLiveSheet = true;
+      const freshUser = findUserRecord();
+      if (freshUser) {
+        user = freshUser;
+        check = evaluatePasswordForUser(user);
+      }
+    }
+
     const resolvedEmail = String(user.email || cleanEmail).trim().toLowerCase();
     if (user.status === USER_STATUSES.DISABLED) {
-      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_BLOCKED', status: 'FAILURE', errorCode: 'ERR_ACCOUNT_DISABLED', userAgent });
+      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_BLOCKED', status: 'FAILURE', errorCode: 'ERR_ACCOUNT_DISABLED', userAgent, _fastWrite: true });
       throw new Error('Akun Anda dinonaktifkan. Silakan hubungi Administrator.');
     }
     if (user.lockedUntil && now < new Date(user.lockedUntil)) {
       throw new Error('Akun terkunci sementara karena percobaan gagal berulang kali.');
     }
 
-    const hasUpdatedPassword = Boolean(user.passwordUpdatedAt);
-    const isInitialDefaultKey = !hasUpdatedPassword && (cleanPass === 'tfb2b2c' || cleanPass === 'AdminPassword2026!');
-    const matchesHash = Boolean(user.passwordHash) && (verifyPassword(password, user.passwordHash) || verifyPassword(cleanPass, user.passwordHash));
-    const matchesSheetPlainIfUnsetHash = !user.passwordHash && Boolean(user.passwordDisplay) && String(user.passwordDisplay).trim() === cleanPass;
-    const isValidPassword = matchesHash || matchesSheetPlainIfUnsetHash || isInitialDefaultKey;
+    const { hasUpdatedPassword, isInitialDefaultKey, matchesHash, matchesSheetPlainIfUnsetHash, isValidPassword } = check;
 
     if (!isValidPassword) {
       const failedCount = (Number(user.failedLoginCount) || 0) + 1;
@@ -921,41 +1012,48 @@ const AuthService = {
       if (failedCount >= DMS_CONFIG.DEFAULT_MAX_LOGIN_ATTEMPTS) {
         updateData.lockedUntil = new Date(now.getTime() + DMS_CONFIG.LOCKOUT_DURATION_MINUTES * 60 * 1000).toISOString();
       }
-      updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData);
-      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_INVALID_PASSWORD', userAgent });
+      updateRecordByRow(SHEETS.USERS, user._rowNumber, updateData, { skipFlush: true, skipSchemaCheck: true });
+      AuditService.log({ userId: user.userId, userEmail: resolvedEmail, action: 'LOGIN_FAILED', status: 'FAILURE', errorCode: 'ERR_INVALID_PASSWORD', userAgent, _fastWrite: true });
       throw new Error('Password anda salah. Pastikan Anda menggunakan password terbaru Anda.');
     }
 
-    // Sync passwordHash/passwordDisplay on initial default login or sheet-added row if missing
-    const updateSuccessData = { failedLoginCount: 0, lockedUntil: '', lastLoginAt: now.toISOString() };
-    if ((isInitialDefaultKey || matchesSheetPlainIfUnsetHash) && (!user.passwordHash || !verifyPassword(cleanPass, user.passwordHash))) {
-      updateSuccessData.passwordHash = hashPassword(cleanPass, generateSalt());
-      updateSuccessData.passwordDisplay = cleanPass;
-      updateSuccessData.mustChangePassword = false;
-      updateSuccessData.status = USER_STATUSES.ACTIVE;
-    } else if (!user.passwordDisplay && cleanPass) {
-      updateSuccessData.passwordDisplay = cleanPass;
-    }
-    updateRecordByRow(SHEETS.USERS, user._rowNumber, updateSuccessData);
-
+    // Generate & cache session token FIRST (~5ms) so subsequent portal requests authenticate immediately
     const rawToken = generateSessionToken(user.userId);
     const tokenHash = hashSessionToken(rawToken);
     const timeoutMin = Number(ConfigService.get('SESSION_TIMEOUT_MIN', DMS_CONFIG.DEFAULT_SESSION_TIMEOUT_MINUTES));
     const expiresAt = new Date(now.getTime() + timeoutMin * 60 * 1000).toISOString();
     const sessionId = generateId('SES');
 
-    appendRecord(SHEETS.SESSIONS, {
-      sessionId, userId: user.userId, tokenHash, createdAt: now.toISOString(), lastActivityAt: now.toISOString(), expiresAt, userAgent: userAgent || 'Browser', isValid: true
-    });
-
-    CacheService.getScriptCache().put('TOKEN_' + tokenHash, JSON.stringify({
+    scriptCache.put('TOKEN_' + tokenHash, JSON.stringify({
       sessionId, userId: user.userId, userEmail: resolvedEmail, userName: user.fullName, role: user.role, mustChangePassword: String(user.mustChangePassword) === 'true', lastActivityAt: now.getTime(), expiresAt: new Date(expiresAt).getTime()
     }), timeoutMin * 60);
 
-    AuditService.log({ userId: user.userId, userEmail: resolvedEmail, userName: user.fullName, role: user.role, sessionId, action: 'LOGIN_SUCCESS', status: 'SUCCESS', userAgent });
+    // Sync passwordHash/passwordDisplay only if migrating initial default login or missing hash; otherwise fast lightweight update without blocking flush()
+    const needsHashMigration = (isInitialDefaultKey || matchesSheetPlainIfUnsetHash) && !matchesHash;
+    const updateSuccessData = { failedLoginCount: 0, lockedUntil: '', lastLoginAt: now.toISOString() };
+    if (needsHashMigration) {
+      const newHash = hashPassword(cleanPass, generateSalt());
+      updateSuccessData.passwordHash = newHash;
+      updateSuccessData.passwordDisplay = cleanPass;
+      updateSuccessData.mustChangePassword = false;
+      updateSuccessData.status = USER_STATUSES.ACTIVE;
+      try { scriptCache.put(computeFastAuthProofKey(user.userId, newHash, cleanPass), '1', 21600); } catch (e) {}
+      updateRecordByRow(SHEETS.USERS, user._rowNumber, updateSuccessData);
+    } else if (Number(user.failedLoginCount) > 0 || user.lockedUntil || !user.passwordDisplay) {
+      if (!user.passwordDisplay && cleanPass) updateSuccessData.passwordDisplay = cleanPass;
+      updateRecordByRow(SHEETS.USERS, user._rowNumber, updateSuccessData, { skipFlush: true, skipSchemaCheck: true, skipLock: true });
+    } else {
+      // Lightweight non-blocking lastLoginAt update (Apps Script flushes automatically at request end)
+      updateRecordByRow(SHEETS.USERS, user._rowNumber, { lastLoginAt: now.toISOString() }, { skipFlush: true, skipSchemaCheck: true, skipLock: true });
+    }
 
-    let spreadsheetName = DMS_CONFIG.DATABASE_SPREADSHEET_NAME;
-    try { spreadsheetName = getDatabaseSpreadsheet().getName(); } catch (e) {}
+    appendRecord(SHEETS.SESSIONS, {
+      sessionId, userId: user.userId, tokenHash, createdAt: now.toISOString(), lastActivityAt: now.toISOString(), expiresAt, userAgent: userAgent || 'Browser', isValid: true
+    }, { skipFlush: true, skipLock: true });
+
+    AuditService.log({ userId: user.userId, userEmail: resolvedEmail, userName: user.fullName, role: user.role, sessionId, action: 'LOGIN_SUCCESS', status: 'SUCCESS', userAgent, _fastWrite: true });
+
+    const spreadsheetName = getCachedSpreadsheetName();
 
     return {
       sessionToken: rawToken,
@@ -2175,6 +2273,7 @@ function doGet(e) {
  * all file uploads directly save to jackslomberger@gmail.com's Google Drive.
  */
 const ALLOWED_API_ACTIONS = {
+  apiPing: true,
   apiGetPortalInitialData: true,
   apiLogin: true,
   apiLogout: true,
@@ -2321,6 +2420,17 @@ function apiGetPortalInitialData(sessionToken, options) {
     });
   } catch (err) {
     return apiResponseError('ERR_PORTAL_SYNC', err.message);
+  }
+}
+
+function apiPing() {
+  try {
+    // Pre-warm spreadsheet handle and USERS/CONFIG CacheService while user is on the login screen
+    try { readAllRecords(SHEETS.USERS); } catch (e) {}
+    try { readAllRecords(SHEETS.CONFIG); } catch (e) {}
+    return apiResponseSuccess({ warmed: true, ts: Date.now() });
+  } catch (err) {
+    return apiResponseSuccess({ warmed: false, ts: Date.now() });
   }
 }
 
